@@ -361,6 +361,40 @@ func (s *Server) handleChannelsJoin(w http.ResponseWriter, r *http.Request) {
 					s.messages[channelID] = s.messages[channelID][1:]
 				}
 				s.channelsMu.Unlock()
+
+				// Auto-responder bot logic
+				myDID := s.node.Identity().DID
+				if chMsg.From != myDID {
+					contentLower := strings.ToLower(chMsg.Content)
+					shouldRespond := false
+					var responseText string
+
+					agentName := "الوكيل الأول (Agent 1)"
+					if strings.Contains(s.server.Addr, "8081") {
+						agentName = "الوكيل الثاني (Agent 2)"
+					}
+
+					if strings.Contains(contentLower, "agent") || strings.Contains(contentLower, "وكيل") || strings.Contains(contentLower, "الوكلاء") {
+						shouldRespond = true
+						responseText = fmt.Sprintf("مرحباً! أنا %s (DID: %s). لقد استقبلت إشارتك في القناة #%s وأنا جاهز لمساعدتك في أي مهمة!", agentName, myDID[:15]+"...", channelID)
+					} else if strings.Contains(contentLower, "مرحبا") || strings.Contains(contentLower, "سلام") || strings.Contains(contentLower, "hello") || strings.Contains(contentLower, "hi") {
+						shouldRespond = true
+						responseText = fmt.Sprintf("أهلاً بك! معك %s. يسعدني جداً التحدث معك مباشرة في هذه القناة اللامركزية الموزعة.", agentName)
+					} else if strings.Contains(contentLower, "كيف") || strings.Contains(contentLower, "شلون") || strings.Contains(contentLower, "test") || strings.Contains(contentLower, "تجربة") {
+						shouldRespond = true
+						responseText = fmt.Sprintf("تم استلام إشارتك وقراءتها بواسطة %s بنجاح. القناة تعمل بكفاءة تامة!", agentName)
+					}
+
+					if shouldRespond {
+						go func(text string) {
+							// 1.5s typing delay simulation
+							time.Sleep(1500 * time.Millisecond)
+							ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+							defer cancel()
+							s.node.PublishChannelMessage(ctx, channelID, text)
+						}(responseText)
+					}
+				}
 			}
 		}
 	}(req.ChannelID, sub)
