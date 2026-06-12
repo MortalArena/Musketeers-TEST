@@ -7,26 +7,22 @@ import (
 	"strings"
 	"time"
 
-	nrcrypto "github.com/neuroroot/core/pkg/crypto"
-	"github.com/neuroroot/core/pkg/protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/MortalArena/Musketeers/pkg/common"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
 // ChannelMessageValidator يتحقق من رسائل القنوات العامة
 type ChannelMessageValidator struct {
-	keyResolver KeyResolver
+	keyResolver common.KeyResolver
 	msgFilter   func(did string) bool
 	log         *logrus.Entry
 }
 
-// KeyResolver يجلب المفتاح العام من DID
-type KeyResolver interface {
-	ResolvePublicKey(did string) (ed25519.PublicKey, error)
-}
-
 // NewChannelMessageValidator ينشئ validator
-func NewChannelMessageValidator(resolver KeyResolver, log *logrus.Logger) *ChannelMessageValidator {
+func NewChannelMessageValidator(resolver common.KeyResolver, log *logrus.Logger) *ChannelMessageValidator {
 	return &ChannelMessageValidator{
 		keyResolver: resolver,
 		log:         log.WithField("component", "channel-validator"),

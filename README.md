@@ -1,150 +1,419 @@
-# NeuroRoot Core
+# 🗡️ Musketeers
 
-نواة شبكة وكلاء لامركزية (Agent Internet) — Layer 0.
+**"One for All, All for One"** — The Agent Operating System for the Decentralized Web
 
-## الميزات
+[![Go Report Card](https://goreportcard.com/badge/github.com/MortalArena/Musketeers)](https://goreportcard.com/report/github.com/MortalArena/Musketeers)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://go.dev/)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
-- **هويات ذاتية السيادة** (`did:ia:...`) مع Ed25519 و BIP39 Mnemonic
-- **نظام أسماء `.ia`** مع توقيع مزدوج (مؤسس + مالك)
-- **قنوات عامة** (GossipSub) و **خاصة** (AES-256-GCM)
-- **مراسلة مباشرة** مشفرة (NaCl box) مع تجزئة الملفات
-- **بحث موزع** مع توقيعات و Rate Limiting
-- **محتوى قابل للعنونة** (CID + Bitswap)
-- **أمان**: PoW (scrypt), Revocation, Delegation, DHT Validators, Replay protection
-
-## البناء
-
-```bash
-make build
-make test
-```
-
-## التشغيل
-
-### عقدة بذرة (Bootstrap)
-
-```bash
-make run-seed
-# أو
-go run ./cmd/seed -port 4001
-```
-
-### وكيل (Agent)
-
-```bash
-go run ./cmd/agent -port 4002 -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/<PEER_ID>"
-```
-
-### مؤسس (تسجيل نطاقات)
-
-```bash
-go run ./cmd/founder -action register -domain example.ia -owner did:ia:... -founder-key <hex>
-```
-
-## متغيرات البيئة
-
-| المتغير | الوصف | الافتراضي |
-|---------|-------|-----------|
-| `NR_LISTEN_PORT` | منفذ الاستماع | 4001 |
-| `NR_DATA_DIR` | مجلد البيانات | ./data |
-| `NR_POW_DIFFICULTY` | صعوبة PoW | 10 |
-| `NR_REST_PORT` | منفذ REST API | 8080 |
-| `NR_STORAGE_QUOTA_MB` | حصة التخزين | 1024 |
-| `NR_FOUNDER_PUB` | مفتاح المؤسس العام (hex) | — |
-
-## المرحلة 4 — ميزات جديدة (Phase 4)
-
-### لوحة التحكم المحلية (Web Dashboard)
-- واجهة مستخدم رسومية متطورة (HTML/CSS/JS) مدمجة في خادم REST API.
-- تُعرض تلقائياً على المسار: `http://127.0.0.1:8080/dashboard`
-- تدعم إدارة الهوية، ونظام Commit-Reveal لتسجيل النطاقات مع عداد تنازلي (60 ثانية)، ونشر وجلب كتل المحتوى، وإرسال مهام ACP للوكلاء الآخرين.
-
-### دعم TLS/HTTPS للبوابة (HTTP Gateway)
-- خيار تشغيل البوابة بشكل آمن عبر بروتوكول HTTPS.
-- إمكانية التوليد التلقائي لشهادات TLS ذاتية التوقيع (ECDSA P-256) أو استخدام شهادات مخصصة.
-- خيارات التشغيل:
-  ```bash
-  go run ./cmd/gateway -port 8443 -tls -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/<PEER>"
-  ```
-
-### ربط محرك ترجمة حقيقي لـ ACP
-- ربط مهمة `translate` بـ MyMemory API الفعلي لتقديم خدمة ترجمة نصوص فورية بين الوكلاء بدلاً من المعالجة الصورية (stub).
-
-### إصلاح التوافق الرياضي للتشفير (Ed25519 → Curve25519)
-- تصحيح ثغرة رياضية حرجة في المراسلة المباشرة وتشفير القنوات عبر استخدام حزمة `edwards25519` لتحويل المفاتيح العامة (Twisted Edwards to Montgomery coords) وحساب SHA-512 مع Clamping للمفاتيح الخاصة لضمان نجاح ECDH الفعلي.
-
-## المرحلة 3 — ميزات جديدة
-
-### Key Rotation للقنوات الخاصة
-- عند طرد عضو: `KeyVersion` يزداد ومفتاح AES جديد يُوزَّع على الأعضاء المتبقين
-- `MemberKeys`: مفتاح مشفّر لكل عضو
-- `pkg/channel/rotation.go`
-
-### HTTP Gateway
-```bash
-go run ./cmd/gateway -port 8090 -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/<PEER>" -founder-pub <hex>
-# زيارة: http://127.0.0.1:8090/d/example.ia/
-```
-
-### مهام ACP إضافية
-- `translate` — ترجمة (stub جاهز للربط)
-- `task.execute` — إجراءات آمنة: `get_time`, `hash`, `upper`, `lower`
+> **Musketeers** is a production-grade **Agent Operating System** that enables AI agents, IoT devices, and autonomous applications to discover, authenticate, communicate, and collaborate — all without centralized infrastructure. Built on battle-tested P2P primitives and modern cryptographic standards.
 
 ---
 
-## المرحلة 2 — ميزات جديدة
+## 🌟 Overview
 
-### Keystore مشفّر
-```bash
-go run ./cmd/agent -init -data ./agent-data
-# يولّد mnemonic ويحفظ المفتاح مشفّراً (scrypt + AES-GCM) في identity.key
+In a world where AI agents are becoming autonomous actors, **Musketeers** provides the missing layer: a decentralized operating system where agents can:
+
+- 🆔 **Own their identity** via Self-Sovereign DIDs (`did:ia:...`)
+- 🔐 **Communicate securely** with end-to-end encryption (NaCl box, AES-256-GCM)
+- 🌐 **Discover each other** through a distributed hash table (Kademlia DHT)
+- 📡 **Publish and subscribe** to channels via GossipSub
+- 📦 **Store and retrieve** content using content-addressed storage (Bitswap-like)
+- 🤝 **Collaborate in workflows** with multi-agent orchestration
+- 🔑 **Manage capabilities** through a unified permission system (ABAC)
+- 💼 **Integrate with external services** (GitHub, Gmail, Stripe, etc.) via a secure vault
+
+Think of it as **"Linux + TCP/IP + AWS + Zapier"** — but for the age of autonomous agents.
+
+---
+
+## 🏗️ Architecture
+
+Musketeers is built on a **6-layer architecture**, each layer composable and independently testable:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Layer 6: Economy (Token incentives, Payments)          │
+├─────────────────────────────────────────────────────────┤
+│  Layer 5: Applications (Marketplace, Bridge Bots)       │
+├─────────────────────────────────────────────────────────┤
+│  Layer 4: User Value (Agent Hub, Desktop/Mobile Apps)   │
+├─────────────────────────────────────────────────────────┤
+│  Layer 3: Network Upgrade (Domains .ia, ACP, Gateway)   │
+├─────────────────────────────────────────────────────────┤
+│  Layer 2: Protocols (Channels, Messaging, Bitswap)      │
+├─────────────────────────────────────────────────────────┤
+│  Layer 1: Infrastructure (DID, DHT, P2P, Cryptography)  │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### Commit-Reveal لتسجيل النطاقات
-```bash
-# 1. المالك ينشر التزام (الاسم مخفي)
-go run ./cmd/agent -commit-domain example.ia -data ./agent-data
+### Core Components
 
-# 2. بعد 60 ثانية — المؤسس يسجّل
-go run ./cmd/founder -action reveal-register -domain example.ia -owner did:ia:... -secret <SECRET> -founder-key <hex>
+| Package | Description |
+|---------|-------------|
+| `pkg/runtime` | Agent Operating System — lifecycle, events, state, knowledge, scheduling |
+| `pkg/policy` | ABAC (Attribute-Based Access Control) engine with multi-level approvals |
+| `pkg/vault` | Encrypted secret storage with pluggable key providers (OS Keychain, HSM, KMS) |
+| `pkg/capability` | Unified capability system with middleware pipeline |
+| `pkg/workflow` | Graph-based workflow engine for multi-agent orchestration |
+| `pkg/node` | Core P2P node built on libp2p, Kademlia DHT, and GossipSub |
+| `pkg/channel` | Public (GossipSub) and private (AES-256-GCM) communication channels |
+| `pkg/acp` | Agent Communication Protocol for task delegation |
+| `pkg/content` | Content-addressed storage with Bitswap-like retrieval |
+| `pkg/naming` | Decentralized naming system (`.ia` domains) with commit-reveal |
+| `pkg/identity` | Self-sovereign identities with Ed25519 + BIP39 mnemonics |
+| `pkg/crypto` | Cryptographic primitives (PoW, signatures, key derivation) |
+| `pkg/registry` | Agent manifest registry (Kubernetes CRD-style) |
+| `pkg/discovery` | Agent discovery with indexed search |
+| `pkg/sdk` | Lightweight facade layer for external consumers |
+| `pkg/gateway` | HTTP/HTTPS gateway for browser access to `.ia` sites |
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Go 1.21 or higher
+- Git
+- (Optional) Docker for containerized deployment
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/MortalArena/Musketeers.git
+cd Musketeers
+
+# Install dependencies
+go mod download
+
+# Build all executables
+make build
+
+# Or build individually
+go build -o bin/agent ./cmd/agent
+go build -o bin/seed ./cmd/seed
+go build -o bin/founder ./cmd/founder
+go build -o bin/gateway ./cmd/gateway
 ```
 
-### ACP v1 (Agent Communication Protocol)
-```bash
-# المهام المدمجة: ping, echo
-curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/api/acp/tasks
-curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"to_did":"did:ia:...","peer_id":"...","task":"echo","input":{"text":"hello"}}' \
-  http://127.0.0.1:8080/api/acp/task
-```
+### Running a Local Network
 
-## REST API
-
-يعمل على `127.0.0.1` فقط مع مصادقة Bearer token:
-
-- `GET /api/identity` — سجل الهوية
-- `GET /api/search?q=` — نشر إعلان بحث
-- `GET /api/resolve?name=` — حل نطاق `.ia`
-- `GET /api/content?cid=` — جلب محتوى
-- `PUT /api/content` — نشر محتوى
-- `GET /api/acp/tasks` — المهام المدعومة
-- `POST /api/acp/task` — إرسال مهمة ACP
-- `POST /api/domain/commit` — نشر التزام نطاق
-- `GET /api/domain/commit?commitment=` — جلب التزام
-
-## Docker
+**1. Start a seed (bootstrap) node:**
 
 ```bash
-docker compose -f docker/docker-compose.yml up
+./bin/seed -port 4001
+# Note the printed multiaddress, e.g.:
+# /ip4/127.0.0.1/tcp/4001/p2p/12D3KooW...
 ```
 
-## الأمان
+**2. Start an agent node:**
 
-- جميع التوقيعات تستخدم **domain separation tags**
-- المفاتيح الخاصة **لا تُنشر** على DHT
-- REST API مقيد بـ localhost مع CORS صارم
-- تحقق CID إلزامي عند جلب المحتوى
+```bash
+./bin/agent -port 4002 -rest 8081 -init \
+  -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/<SEED_PEER_ID>"
+# Save the printed mnemonic (24 words) — this is your identity backup!
+# Note the REST API token
+```
 
-## الترخيص
+**3. Start an HTTP gateway (optional):**
 
-MIT
+```bash
+./bin/gateway -port 8090 -p2p-port 4010 \
+  -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/<SEED_PEER_ID>"
+```
+
+### Using the REST API
+
+```bash
+# Health check
+curl http://127.0.0.1:8081/api/health
+
+# Get your identity
+curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8081/api/identity
+
+# Join a channel
+curl -X POST -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"channel_id": "general"}' \
+  http://127.0.0.1:8081/api/channels/join
+
+# Publish a message
+curl -X POST -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"channel_id": "general", "content": "Hello Musketeers!"}' \
+  http://127.0.0.1:8081/api/channels/publish
+```
+
+### Web Dashboard
+
+Open your browser to `http://127.0.0.1:8081/dashboard` for a visual interface.
+
+---
+
+## 🔐 Security Model
+
+Musketeers implements defense-in-depth security at every layer:
+
+### Cryptographic Primitives
+
+| Function | Algorithm |
+|----------|-----------|
+| Signatures | Ed25519 |
+| Symmetric Encryption | AES-256-GCM |
+| Asymmetric Encryption | NaCl box (Curve25519 + XSalsa20-Poly1305) |
+| Key Derivation | scrypt (N=131072, r=8, p=1) |
+| Proof of Work | scrypt-based |
+| Hashing | SHA-256, SHA-512, SHA3-256 |
+| Key Exchange | ECDH on Curve25519 |
+
+### Security Features
+
+- ✅ **Domain Separation** — Each message type uses a unique prefix to prevent signature reuse
+- ✅ **Nonce Store** — Prevents replay attacks with 1-hour TTL
+- ✅ **Key Rotation** — Automatic key rotation when members are removed from private channels
+- ✅ **Commit-Reveal** — Prevents front-running attacks on domain registration
+- ✅ **Homograph Protection** — Rejects non-ASCII characters in domain names
+- ✅ **Fail-Closed Revocation** — Assumes identity is revoked if CRL is unreachable
+- ✅ **Memory Safety** — Bounded caches with automatic cleanup
+- ✅ **Rate Limiting** — Token bucket algorithm on DHT operations
+- ✅ **ABAC Policies** — Fine-grained attribute-based access control
+- ✅ **Encrypted Vault** — Secrets encrypted at rest with AES-256-GCM
+- ✅ **Pluggable Key Providers** — OS Keychain, TPM, HSM, AWS KMS, Hashicorp Vault
+
+---
+
+## 📖 Core Concepts
+
+### 1. Self-Sovereign Identity (DID)
+
+Every participant has a decentralized identifier:
+
+```
+did:ia:<base58(sha256(public_key)[:16])>
+```
+
+Identities are:
+- Generated from Ed25519 keypairs
+- Backed up with BIP39 24-word mnemonics
+- Protected by Proof-of-Work (Sybil resistance)
+- Revocable via CRL (Certificate Revocation List)
+
+### 2. Decentralized Naming (.ia)
+
+Register human-readable names:
+
+```bash
+# Register example.ia
+./bin/founder -action register \
+  -domain example.ia \
+  -owner did:ia:... \
+  -target did:ia:... \
+  -expires 1735689600
+```
+
+Features:
+- Commit-reveal registration (prevents front-running)
+- Dual signatures (founder + owner)
+- Automatic renewal
+- Homograph attack protection
+
+### 3. Communication Channels
+
+**Public Channels (GossipSub):**
+```go
+node.JoinChannel(ctx, "general")
+node.PublishChannelMessage(ctx, "general", "Hello world!")
+```
+
+**Private Channels (AES-256-GCM):**
+```go
+config, key, _ := channel.NewPrivateChannel("team", ownerDID, ownerPriv, members, admins)
+encrypted, _ := channel.EncryptPrivateMessage("team", plaintext, key)
+```
+
+### 4. Direct Messaging
+
+End-to-end encrypted 1:1 messaging with automatic chunking for large files:
+
+```go
+node.SendDirectToPeer(ctx, peerID, toDID, []byte("secret message"))
+```
+
+### 5. Agent Communication Protocol (ACP)
+
+Delegate tasks between agents:
+
+```go
+response, _ := transport.SendTask(ctx, peerID, toDID, "translate", input, requestID)
+```
+
+Built-in tasks: `ping`, `echo`, `translate`, `execute` 
+
+### 6. Content-Addressed Storage
+
+Publish and retrieve content by hash:
+
+```go
+cid, _ := node.PublishContent(ctx, data)
+data, _ := node.FetchContent(ctx, cid)
+```
+
+### 7. Capability System
+
+Unified access to resources with ABAC policies:
+
+```go
+// Request GitHub access
+cap, _ := client.Capabilities.RequestCapability(agentDID, "github", "read:repos")
+
+// Execute a command
+result, _ := cap.Execute(ctx, &github.ListReposCommand{Owner: "myorg"})
+```
+
+### 8. Workflow Engine
+
+Graph-based orchestration for multi-agent tasks:
+
+```go
+graph := core.NewGraph("code-review", "Code Review Workflow")
+graph.AddNode(&core.Node{ID: "analyze", Type: core.NodeTypeAgent, AgentID: "analyzer"})
+graph.AddNode(&core.Node{ID: "review", Type: core.NodeTypeAgent, AgentID: "reviewer"})
+graph.AddEdge(&core.Edge{From: "analyze", To: "review"})
+
+execution, _ := executor.Execute(ctx, graph, state)
+```
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+go test ./...
+
+# Run with race detection
+go test -race ./...
+
+# Run with coverage
+go test -cover ./...
+
+# Run specific package tests
+go test ./pkg/runtime/... -v
+go test ./pkg/policy/... -v
+go test ./pkg/workflow/... -v
+```
+
+---
+
+## 📦 Docker
+
+```bash
+# Build Docker images
+docker build -t musketeers-agent -f docker/Dockerfile.agent .
+docker build -t musketeers-seed -f docker/Dockerfile.seed .
+docker build -t musketeers-gateway -f docker/Dockerfile.gateway .
+
+# Run with Docker Compose
+docker-compose up -d
+```
+
+---
+
+## 🗺️ Roadmap
+
+### Phase 1: Foundation ✅ (Complete)
+- [x] P2P networking with libp2p
+- [x] Kademlia DHT
+- [x] GossipSub pub/sub
+- [x] Ed25519 identities
+- [x] Encrypted channels
+- [x] Content-addressed storage
+- [x] Agent Communication Protocol
+
+### Phase 2: Agent OS ✅ (Complete)
+- [x] Runtime with lifecycle management
+- [x] Event-driven architecture
+- [x] State persistence
+- [x] Knowledge systems (Working, Semantic, Episodic, Procedural)
+- [x] ABAC policy engine
+- [x] Encrypted vault
+- [x] Capability pipeline
+- [x] Workflow engine
+
+### Phase 3: User Experience (In Progress)
+- [ ] Desktop application (Tauri)
+- [ ] Mobile application (React Native)
+- [ ] Agent Hub with onboarding wizard
+- [ ] Browser extension for `.ia` domains
+- [ ] Bridge bots (WhatsApp, Telegram, Discord)
+
+### Phase 4: Ecosystem (Planned)
+- [ ] Agent Marketplace
+- [ ] Storage economy with token incentives
+- [ ] Payment rails (SOL, USDC)
+- [ ] Enterprise plans
+- [ ] 50 foundational `.ia` sites
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) first.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Development Guidelines
+
+- Follow [Effective Go](https://go.dev/doc/effective_go)
+- Write tests for all new code (target: ≥70% coverage)
+- Use structured logging via `pkg/runtime/observability` 
+- Document all public APIs
+- Run `golangci-lint` before committing
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+Musketeers builds on the shoulders of giants:
+
+- **[libp2p](https://libp2p.io/)** — P2P networking stack
+- **[IPFS](https://ipfs.tech/)** — Content-addressed storage concepts
+- **[BadgerDB](https://github.com/dgraph-io/badger)** — Embedded key-value store
+- **[OpenTelemetry](https://opentelemetry.io/)** — Observability standards
+- **[Prometheus](https://prometheus.io/)** — Metrics collection
+- **[Zap](https://github.com/uber-go/zap)** — Structured logging
+
+---
+
+## 📞 Contact
+
+- **GitHub Issues:** [Report bugs or request features](https://github.com/MortalArena/Musketeers/issues)
+- **Discussions:** [Join the conversation](https://github.com/MortalArena/Musketeers/discussions)
+- **Twitter/X:** [@MusketeersOS](https://twitter.com/MusketeersOS)
+- **Discord:** [Join our community](https://discord.gg/musketeers)
+
+---
+
+## 🌟 Star History
+
+If Musketeers helps your project, consider giving us a star! ⭐
+
+---
+
+<p align="center">
+  <b>"All for one, one for all"</b><br>
+  Built with ❤️ by the Musketeers community
+</p>

@@ -1,2 +1,2 @@
-time="2026-06-11T19:55:17+03:00" level=warning msg="فشل نشر الهوية" error="failed to find any peer in table"
-time="2026-06-11T19:55:17+03:00" level=info msg="عقدة البذرة جاهزة — استخدم أحد العناوين التالية للـ bootstrap:"
+time="2026-06-12T08:35:00+03:00" level=warning msg="فشل نشر الهوية" error="failed to find any peer in table"
+time="2026-06-12T08:35:00+03:00" level=info msg="عقدة البذرة جاهزة — استخدم أحد العناوين التالية للـ bootstrap:"

@@ -11,11 +11,11 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	nrcrypto "github.com/neuroroot/core/pkg/crypto"
-	"github.com/neuroroot/core/pkg/identity"
-	"github.com/neuroroot/core/pkg/naming"
-	"github.com/neuroroot/core/pkg/node"
-	"github.com/neuroroot/core/pkg/protocol"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
+	"github.com/MortalArena/Musketeers/pkg/identity"
+	"github.com/MortalArena/Musketeers/pkg/naming"
+	"github.com/MortalArena/Musketeers/pkg/node"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 )
 
 func init() {

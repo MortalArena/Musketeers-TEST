@@ -16,8 +16,8 @@ import (
 
 	"filippo.io/edwards25519"
 	"github.com/dgraph-io/badger/v4"
-	nrcrypto "github.com/neuroroot/core/pkg/crypto"
-	"github.com/neuroroot/core/pkg/protocol"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"
 )
@@ -220,6 +220,7 @@ type ChunkAssembler struct {
 	chunks     map[string]map[int][]byte
 	totals     map[string]int
 	timestamps map[string]time.Time
+	stopCh     chan struct{}
 }
 
 // NewChunkAssembler ينشئ مجمّعاً مع تشغيل حلقة تنظيف خلفية
@@ -228,12 +229,19 @@ func NewChunkAssembler() *ChunkAssembler {
 		chunks:     make(map[string]map[int][]byte),
 		totals:     make(map[string]int),
 		timestamps: make(map[string]time.Time),
+		stopCh:     make(chan struct{}),
 	}
 	// حلقة تنظيف دورية كل 5 دقائق لمسح الملفات غير المكتملة التي تجاوز عمرها 30 دقيقة
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
-		for range ticker.C {
-			ca.Cleanup(30 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				ca.Cleanup(30 * time.Minute)
+			case <-ca.stopCh:
+				return
+			}
 		}
 	}()
 	return ca
@@ -251,6 +259,11 @@ func (ca *ChunkAssembler) Cleanup(maxAge time.Duration) {
 			delete(ca.timestamps, id)
 		}
 	}
+}
+
+func (ca *ChunkAssembler) Close() error {
+	close(ca.stopCh)
+	return nil
 }
 
 // Add يضيف جزءاً ويتحقق من بصمة الملف الكامل عند الاكتمال

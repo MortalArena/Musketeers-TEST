@@ -6,28 +6,59 @@ bin/
 *.so
 *.dylib
 
-# Test binaries
+# Test binary
 *.test
+
+# Output of the go coverage tool
 *.out
 
-# Local node data and keystores
-seed-data/
-agent-data/
-founder-data/
-gateway-data/
-data/
+# Dependency directories
+vendor/
 
-# BadgerDB databases
-badger/
+# Go workspace file
+go.work
+go.work.sum
 
-# IDEs
+# IDE
 .idea/
 .vscode/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+*.swp
+*.swo
+*~
 
-# Environment configurations
+# OS
+.DS_Store
+Thumbs.db
+
+# Data directories
+data/
+seed-data/
+agent-data/
+
+# Logs
+*.log
+logs/
+
+# Environment files
 .env
+.env.local
+.env.*.local
+
+# Keys and secrets
+*.key
+*.pem
+keystore.json
+vault.json
+credentials.json
+
+# Docker
+.docker/
+
+# Build artifacts
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

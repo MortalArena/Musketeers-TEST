@@ -5,7 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 
-	"github.com/neuroroot/core/pkg/channel"
+	"github.com/MortalArena/Musketeers/pkg/channel"
 )
 
 // PublishChannelConfig ينشر إعدادات قناة خاصة على DHT
@@ -15,12 +15,12 @@ func (n *Node) PublishChannelConfig(ctx context.Context, cfg *channel.ChannelCon
 		return err
 	}
 	key := "/nr/channel-config/" + cfg.ID
-	return n.dht.PutValue(ctx, key, data)
+	return n.dht().PutValue(ctx, key, data)
 }
 
 // GetChannelConfig يجلب إعدادات قناة
 func (n *Node) GetChannelConfig(ctx context.Context, channelID string) (*channel.ChannelConfig, error) {
-	val, err := n.dht.GetValue(ctx, "/nr/channel-config/"+channelID)
+	val, err := n.dht().GetValue(ctx, "/nr/channel-config/"+channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func (n *Node) GetChannelConfig(ctx context.Context, channelID string) (*channel
 
 // RemoveChannelMember يزيل عضواً مع تدوير المفتاح
 func (n *Node) RemoveChannelMember(ctx context.Context, cfg *channel.ChannelConfig, memberDID string, memberPubs map[string]ed25519.PublicKey) ([]byte, error) {
-	newKey, err := cfg.RemoveMember(memberDID, n.keyPair.DID, n.keyPair.Private, memberPubs)
+	newKey, err := cfg.RemoveMember(memberDID, n.keyPair().DID, n.keyPair().Private, memberPubs)
 	if err != nil {
 		return nil, err
 	}

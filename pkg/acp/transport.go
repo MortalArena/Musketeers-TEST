@@ -11,29 +11,25 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/neuroroot/core/pkg/protocol"
+	"github.com/MortalArena/Musketeers/pkg/common"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
 const maxACPMessageSize = protocol.MaxMessageSize
 
-// KeyResolver يجلب المفتاح العام من DID
-type KeyResolver interface {
-	ResolvePublicKey(did string) (ed25519.PublicKey, error)
-}
-
 // Transport نقل ACP عبر libp2p
 type Transport struct {
 	host     host.Host
 	router   *Router
-	resolver KeyResolver
+	resolver common.KeyResolver
 	fromDID  string
 	priv     ed25519.PrivateKey
 	log      *logrus.Entry
 }
 
 // NewTransport ينشئ ناقل ACP
-func NewTransport(h host.Host, fromDID string, priv ed25519.PrivateKey, resolver KeyResolver, router *Router, log *logrus.Logger) *Transport {
+func NewTransport(h host.Host, fromDID string, priv ed25519.PrivateKey, resolver common.KeyResolver, router *Router, log *logrus.Logger) *Transport {
 	return &Transport{
 		host:     h,
 		router:   router,

@@ -11,7 +11,7 @@ import (
 	"fmt"
 
 	"filippo.io/edwards25519"
-	"github.com/neuroroot/core/pkg/protocol"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 	"golang.org/x/crypto/curve25519"
 )
 

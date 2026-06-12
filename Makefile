@@ -19,4 +19,4 @@ clean:
 	rm -rf bin/ seed-data agent-data founder-data
 
 docker:
-	docker build -t neuroroot-core -f docker/Dockerfile .
+	docker build -t musketeers -f docker/Dockerfile .

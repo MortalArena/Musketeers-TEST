@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/badger/v4"
-	"github.com/neuroroot/core/pkg/protocol"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 )
 
 // BlockStore واجهة تخزين الكتل

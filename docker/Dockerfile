@@ -13,13 +13,13 @@ RUN CGO_ENABLED=1 go build -o /founder ./cmd/founder
 FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates
-RUN adduser -D -u 1000 neuroroot
+RUN adduser -D -u 1000 musketeers
 
 COPY --from=builder /seed /usr/local/bin/seed
 COPY --from=builder /agent /usr/local/bin/agent
 COPY --from=builder /founder /usr/local/bin/founder
 
-USER neuroroot
+USER musketeers
 WORKDIR /data
 VOLUME /data
 

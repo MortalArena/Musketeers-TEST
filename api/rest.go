@@ -13,9 +13,9 @@ import (
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/neuroroot/core/pkg/naming"
-	"github.com/neuroroot/core/pkg/node"
-	"github.com/neuroroot/core/pkg/protocol"
+	"github.com/MortalArena/Musketeers/pkg/naming"
+	"github.com/MortalArena/Musketeers/pkg/node"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 

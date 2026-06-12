@@ -75,7 +75,7 @@ func SaveKeystore(path, passphrase string, kp *KeyPair, mnemonic string) error {
 		return err
 	}
 
-	ciphertext := gcm.Seal(nil, nonce, plainJSON, []byte("neuroroot-keystore-v1"))
+	ciphertext := gcm.Seal(nil, nonce, plainJSON, []byte("Musketeers-keystore-v1"))
 
 	ks := KeystoreFile{
 		Version:    keystoreVersion,
@@ -138,7 +138,7 @@ func LoadKeystore(path, passphrase string) (*KeyPair, string, error) {
 		return nil, "", err
 	}
 
-	plainJSON, err := gcm.Open(nil, nonce, ciphertext, []byte("neuroroot-keystore-v1"))
+	plainJSON, err := gcm.Open(nil, nonce, ciphertext, []byte("Musketeers-keystore-v1"))
 	if err != nil {
 		return nil, "", fmt.Errorf("عبارة مرور خاطئة أو ملف تالف")
 	}

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	nrcrypto "github.com/neuroroot/core/pkg/crypto"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
 )
 
 // RevocationRecord سجل إلغاء الهوية

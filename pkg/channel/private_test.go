@@ -4,7 +4,7 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/neuroroot/core/pkg/protocol"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 )
 
 func TestPrivateChannelLifecycle(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	nrcrypto "github.com/neuroroot/core/pkg/crypto"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
 )
 
 // ChannelConfigPayloadV2 payload موقّع يشمل إصدار المفتاح

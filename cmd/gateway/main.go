@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	nrcrypto "github.com/neuroroot/core/pkg/crypto"
-	"github.com/neuroroot/core/pkg/gateway"
-	"github.com/neuroroot/core/pkg/identity"
-	"github.com/neuroroot/core/pkg/node"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
+	"github.com/MortalArena/Musketeers/pkg/gateway"
+	"github.com/MortalArena/Musketeers/pkg/identity"
+	"github.com/MortalArena/Musketeers/pkg/node"
 	"github.com/sirupsen/logrus"
 )
 

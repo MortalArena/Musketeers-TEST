@@ -1,10 +1,10 @@
 package protocol
 
-// بروتوكولات NeuroRoot
+// بروتوكولات Musketeers
 const (
 	ProtocolBitswap    = "/nr/bitswap/1.0.0"
 	ProtocolDirect     = "/nr/direct/1.0.0"
-	ProtocolVersion    = "neuroroot/1.0.0"
+	ProtocolVersion    = "Musketeers/1.0.0"
 )
 
 // أقصى أحجام

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	nrcrypto "github.com/neuroroot/core/pkg/crypto"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
 )
 
 // DomainRecord سجل النطاق على DHT

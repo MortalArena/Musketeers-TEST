@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/neuroroot/core/pkg/node"
+	"github.com/MortalArena/Musketeers/pkg/node"
 	"github.com/sirupsen/logrus"
 )
 
@@ -93,7 +93,7 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization: []string{"NeuroRoot"},
+			Organization: []string{"Musketeers"},
 		},
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
@@ -129,8 +129,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!DOCTYPE html><html><head><title>NeuroRoot Gateway</title></head>
-<body><h1>NeuroRoot Gateway</h1>
+	fmt.Fprintf(w, `<!DOCTYPE html><html><head><title>Musketeers Gateway</title></head>
+<body><h1>Musketeers Gateway</h1>
 <p>استخدم: <code>/d/example.ia/</code> لزيارة موقع .ia</p>
 </body></html>`)
 }

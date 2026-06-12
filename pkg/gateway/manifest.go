@@ -6,7 +6,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/neuroroot/core/pkg/protocol"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 )
 
 // NormalizeSitePath يطبّع مسار ملف الموقع ويرفض path traversal

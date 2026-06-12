@@ -12,7 +12,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-const hkdfInfo = "neuroroot-ed25519-seed"
+const hkdfInfo = "Musketeers-ed25519-seed"
 
 // NormalizePassphrase يطبّق NFKD على عبارة المرور (معيار BIP39)
 func NormalizePassphrase(passphrase string) string {

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	nrcrypto "github.com/neuroroot/core/pkg/crypto"
-	"github.com/neuroroot/core/pkg/protocol"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
+	"github.com/MortalArena/Musketeers/pkg/protocol"
 )
 
 // IndexEntry إعلان بحث موزع

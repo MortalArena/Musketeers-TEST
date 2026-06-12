@@ -6,7 +6,7 @@ const DashboardHTML = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NeuroRoot Core Portal</title>
+    <title>Musketeers Core Portal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800;900&family=Tajawal:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
@@ -1523,7 +1523,7 @@ const DashboardHTML = `<!DOCTYPE html>
             <div>
                 <div class="logo-area">
                     <div class="logo-icon">NR</div>
-                    <div class="logo-text">NeuroRoot</div>
+                    <div class="logo-text">Musketeers</div>
                 </div>
                 
                 <div class="nav-menu">
@@ -1652,7 +1652,7 @@ const DashboardHTML = `<!DOCTYPE html>
                             <div class="passport-avatar-zone">
                                 <div class="passport-avatar" id="home-passport-avatar">N</div>
                                 <div>
-                                    <h3 style="font-size:1.15rem; font-weight:800;" id="home-passport-nickname">NeuroRoot Node</h3>
+                                    <h3 style="font-size:1.15rem; font-weight:800;" id="home-passport-nickname">Musketeers Node</h3>
                                     <span style="font-size:0.75rem; color:var(--accent-cyan);" id="home-passport-status">Active Identity</span>
                                 </div>
                             </div>
@@ -2337,7 +2337,7 @@ const DashboardHTML = `<!DOCTYPE html>
                 { desc: "تم الاتصال بالوكيل did:ia:QysLqvbC4kfgbXbHwuvbxX بنجاح", time: "17:30" }
             ],
             browserHistory: [
-                { name: "welcome.ia", desc: "NeuroRoot Welcome Page" },
+                { name: "welcome.ia", desc: "Musketeers Welcome Page" },
                 { name: "search.ia", desc: "Decentralized Search Portal" },
                 { name: "chat-gate.ia", desc: "Encrypted Web Chat Portal" }
             ],

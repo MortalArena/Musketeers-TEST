@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/neuroroot/core/api"
-	nrcrypto "github.com/neuroroot/core/pkg/crypto"
-	"github.com/neuroroot/core/pkg/identity"
-	"github.com/neuroroot/core/pkg/naming"
-	"github.com/neuroroot/core/pkg/node"
+	"github.com/MortalArena/Musketeers/api"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
+	"github.com/MortalArena/Musketeers/pkg/identity"
+	"github.com/MortalArena/Musketeers/pkg/naming"
+	"github.com/MortalArena/Musketeers/pkg/node"
 	"github.com/sirupsen/logrus"
 )
 
@@ -95,7 +95,7 @@ func main() {
 		"peer":  n.Host().ID().String(),
 		"addrs": n.Addrs(),
 		"acp":   n.SupportedACPTasks(),
-	}).Info("عقدة NeuroRoot جاهزة")
+	}).Info("عقدة Musketeers جاهزة")
 
 	if savedMnemonic != "" {
 		log.Warn("احفظ عبارتك التذكيرية في مكان آمن — لن تُعرض مرة أخرى")
