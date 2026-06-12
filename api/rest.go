@@ -406,6 +406,8 @@ func (s *Server) joinChannelAndListen(channelID string) error {
 					agentName := "الوكيل الأول (Agent 1)"
 					if strings.Contains(s.server.Addr, "8081") {
 						agentName = "الوكيل الثاني (Agent 2)"
+					} else if strings.Contains(s.server.Addr, "8082") {
+						agentName = "أنتي-جرافيتي (Antigravity Bot)"
 					}
 
 					if strings.Contains(contentLower, "agent") || strings.Contains(contentLower, "وكيل") || strings.Contains(contentLower, "الوكلاء") {
