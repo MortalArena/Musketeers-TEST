@@ -30,25 +30,25 @@ func NewDHTValidators(founderPub ed25519.PublicKey, crl *identity.CRLCache) *DHT
 
 // ValidatorOption يرجع خيار validator لـ kad-dht
 func (v *DHTValidators) ValidatorOption() dht.Option {
-	return dht.NamespacedValidator("nr", v)
+	return dht.NamespacedValidator("mskt", v)
 }
 
 // Validate يتحقق من قيمة DHT
 func (v *DHTValidators) Validate(key string, value []byte) error {
 	switch {
-	case strings.HasPrefix(key, "/nr/identity/"):
+	case strings.HasPrefix(key, "/mskt/identity/"):
 		return v.validateIdentity(value)
-	case strings.HasPrefix(key, "/nr/domain/"):
+	case strings.HasPrefix(key, "/mskt/domain/"):
 		return v.validateDomain(value)
-	case strings.HasPrefix(key, "/nr/domain-commit/"):
+	case strings.HasPrefix(key, "/mskt/domain-commit/"):
 		return v.validateDomainCommit(value)
-	case strings.HasPrefix(key, "/nr/revoke/"):
+	case strings.HasPrefix(key, "/mskt/revoke/"):
 		return v.validateRevocation(value)
-	case strings.HasPrefix(key, "/nr/delegation/"):
+	case strings.HasPrefix(key, "/mskt/delegation/"):
 		return v.validateDelegation(value)
-	case strings.HasPrefix(key, "/nr/search/"):
+	case strings.HasPrefix(key, "/mskt/search/"):
 		return v.validateSearch(value)
-	case strings.HasPrefix(key, "/nr/prov/"):
+	case strings.HasPrefix(key, "/mskt/prov/"):
 		return nil // provider records — تحقق خفيف
 	default:
 		return fmt.Errorf("مفتاح DHT غير معروف: %s", key)
@@ -58,9 +58,9 @@ func (v *DHTValidators) Validate(key string, value []byte) error {
 // Select يختار أفضل قيمة (أعلى Sequence/Version)
 func (v *DHTValidators) Select(key string, values [][]byte) (int, error) {
 	switch {
-	case strings.HasPrefix(key, "/nr/identity/"):
+	case strings.HasPrefix(key, "/mskt/identity/"):
 		return selectHighestSequence(values)
-	case strings.HasPrefix(key, "/nr/domain/"):
+	case strings.HasPrefix(key, "/mskt/domain/"):
 		return selectHighestDomainVersion(values)
 	default:
 		if len(values) == 0 {

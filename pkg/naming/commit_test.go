@@ -6,8 +6,8 @@ import (
 )
 
 func TestCommitReveal(t *testing.T) {
-	name := "example.ia"
-	owner := "did:ia:testowner123456"
+	name := "example.mskt"
+	owner := "did:mskt:testowner123456"
 	secret, err := GenerateSecret()
 	if err != nil {
 		t.Fatal(err)

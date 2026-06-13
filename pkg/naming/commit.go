@@ -10,13 +10,13 @@ import (
 )
 
 // MinRevealDelay أقل فترة انتظار بين commit و reveal
-const MinRevealDelay = 60 * time.Second
+const MinRevealDelay = 24 * time.Hour
 
 // DomainCommitRecord سجل التزام بتسجيل نطاق (الاسم مخفي)
 type DomainCommitRecord struct {
-	Commitment string `json:"commitment"` // hex(sha256)
-	Owner      string `json:"owner"`
-	CommittedAt int64 `json:"committed_at"`
+	Commitment  string `json:"commitment"` // hex(sha256)
+	Owner       string `json:"owner"`
+	CommittedAt int64  `json:"committed_at"`
 }
 
 // CommitmentHash يحسب hash(name|owner|secret)
@@ -92,7 +92,7 @@ func VerifyReveal(commit *DomainCommitRecord, name, owner, secret string) error 
 
 // DHTCommitKey مفتاح DHT للتزام
 func DHTCommitKey(commitment string) string {
-	return "/nr/domain-commit/" + commitment
+	return "/mskt/domain-commit/" + commitment
 }
 
 // Marshal يسلسل السجل

@@ -19,7 +19,7 @@ func TestDIDGeneration(t *testing.T) {
 	if kp.DID == "" || len(kp.DID) < 10 {
 		t.Fatal("invalid DID")
 	}
-	if kp.DID[:7] != "did:ia:" {
+	if kp.DID[:9] != "did:mskt:" {
 		t.Fatalf("DID prefix wrong: %s", kp.DID)
 	}
 }

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultPowDifficulty = 16 // N = 1<<16
+	DefaultPowDifficulty = 18              // N = 1<<18
 	DefaultIdentityTTL   = 365 * 24 * 3600 // سنة واحدة بالثواني
 )
 
@@ -51,10 +51,10 @@ func KeyPairFromPrivate(priv ed25519.PrivateKey) *KeyPair {
 	}
 }
 
-// DIDFromPublicKey يحسب DID من المفتاح العام: did:ia:<base58(sha256(pub)[:16])>
+// DIDFromPublicKey يحسب DID من المفتاح العام: did:mskt:<base58(sha256(pub)[:16])>
 func DIDFromPublicKey(pub ed25519.PublicKey) string {
 	h := sha256.Sum256(pub)
-	return "did:ia:" + base58.Encode(h[:16])
+	return "did:mskt:" + base58.Encode(h[:16])
 }
 
 // PowDifficulty يقرأ صعوبة PoW من البيئة

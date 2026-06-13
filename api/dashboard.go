@@ -1501,6 +1501,39 @@ const DashboardHTML = `<!DOCTYPE html>
         .toast.error { border-inline-start: 5px solid var(--accent-rose); }
         .toast.warning { border-inline-start: 5px solid var(--accent-amber); }
 
+        /* WhatsApp-style FAB Button */
+        .channel-fab-container {
+            position: absolute;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 50;
+        }
+
+        .channel-fab-btn {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-emerald), var(--accent-cyan));
+            border: none;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(16, 185, 129, 0.4);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .channel-fab-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 30px rgba(16, 185, 129, 0.6);
+        }
+
+        .channel-fab-btn:active {
+            transform: scale(0.95);
+        }
+
         /* Helpers */
         .flex-between { justify-content: space-between; align-items: center; display: flex; }
         .flex-row-gap { display: flex; gap: 0.5rem; align-items: center; }
@@ -1788,8 +1821,20 @@ const DashboardHTML = `<!DOCTYPE html>
                                 <button class="channel-split-btn active" onclick="switchChannelCategory('public')" data-tr="chan_public">العامة</button>
                                 <button class="channel-split-btn" onclick="switchChannelCategory('private')" data-tr="chan_private">الخاصة</button>
                             </div>
+                            
+                            <!-- WhatsApp-style floating action button for creating channels -->
+                            <div class="channel-fab-container">
+                                <button class="channel-fab-btn" onclick="openCreateChannelModal()" title="إنشاء قناة جديدة">
+                                    <svg viewBox="0 0 24 24" style="width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:2.5;">
+                                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                                    </svg>
+                                </button>
+                            </div>
+
                             <div class="chat-sidebar-search">
                                 <input type="text" class="form-input" id="channels-join-input" placeholder="انضمام لقناة (مثال: lobby)..." onkeydown="if(event.key==='Enter') executeJoinNewChannel()">
+                                <button class="btn btn-primary" style="padding:0.5rem 1rem; margin-top:0.5rem; width:100%;" onclick="executeJoinNewChannel()" data-tr="join">انضمام</button>
                             </div>
                             <div class="chat-list-scroll" id="channels-menu-list">
                                 <!-- Dynamic channels list -->
@@ -1805,6 +1850,7 @@ const DashboardHTML = `<!DOCTYPE html>
                                 <div class="chat-header-actions" id="channel-header-actions" style="display:none;">
                                     <button class="btn btn-secondary" style="padding:0.4rem 0.8rem; font-size:0.75rem;" onclick="toggleMuteChannel()" data-tr="mute">كتم</button>
                                     <button class="btn btn-secondary" style="padding:0.4rem 0.8rem; font-size:0.75rem;" onclick="togglePinChannel()" data-tr="pin">تثبيت</button>
+                                    <button class="btn btn-secondary" style="padding:0.4rem 0.8rem; font-size:0.75rem; background:var(--accent-rose);" onclick="leaveCurrentChannel()" data-tr="leave">مغادرة</button>
                                 </div>
                             </div>
 
@@ -2106,6 +2152,41 @@ const DashboardHTML = `<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- MODAL: Create New Channel -->
+    <div class="modal-overlay" id="modal-create-channel">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 data-tr="create_channel_title">إنشاء قناة جديدة</h3>
+                <button class="close-modal-btn" onclick="closeCreateChannelModal()">
+                    <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:2.5;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="form-group">
+                <label data-tr="channel_name_lbl">اسم القناة</label>
+                <input type="text" class="form-input" id="create-channel-name" placeholder="مثال: general, tech, support">
+            </div>
+            <div class="form-group">
+                <label data-tr="channel_type_lbl">نوع القناة</label>
+                <select class="form-input" id="create-channel-type">
+                    <option value="public">عامة (Public)</option>
+                    <option value="private">خاصة (Private)</option>
+                </select>
+            </div>
+            <div class="form-group" id="channel-members-group" style="display:none;">
+                <label data-tr="channel_members_lbl">الأعضاء (للقنوات الخاصة)</label>
+                <input type="text" class="form-input" id="create-channel-members" placeholder="DIDs مفصولة بفاصلة">
+            </div>
+            <div class="form-group">
+                <label data-tr="channel_desc_lbl">وصف القناة</label>
+                <textarea class="form-input" id="create-channel-desc" rows="3" placeholder="وصف مختصر للقناة..."></textarea>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                <button class="btn btn-secondary" onclick="closeCreateChannelModal()" data-tr="cancel">إلغاء</button>
+                <button class="btn btn-primary" onclick="executeCreateChannel()" data-tr="create">إنشاء</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Hidden file input triggers -->
     <input type="file" id="hidden-file-input" style="display:none;" onchange="handleFileUploadSelected(event)">
 
@@ -2208,7 +2289,15 @@ const DashboardHTML = `<!DOCTYPE html>
                 delegation_cap_lbl: "الصلاحيات الممنوحة (Capabilities)",
                 delegation_exp_lbl: "تاريخ انتهاء الصلاحية (ساعة)",
                 cancel: "إلغاء",
-                confirm: "تأكيد وإصدار"
+                confirm: "تأكيد وإصدار",
+                create_channel_title: "إنشاء قناة جديدة",
+                channel_name_lbl: "اسم القناة",
+                channel_type_lbl: "نوع القناة",
+                channel_members_lbl: "الأعضاء (للقنوات الخاصة)",
+                channel_desc_lbl: "وصف القناة",
+                create: "إنشاء",
+                join: "انضمام",
+                leave: "مغادرة"
             },
             en: {
                 tab_home: "Home",
@@ -2303,7 +2392,15 @@ const DashboardHTML = `<!DOCTYPE html>
                 delegation_cap_lbl: "Granted Capabilities",
                 delegation_exp_lbl: "Expiration Time (hours)",
                 cancel: "Cancel",
-                confirm: "Confirm & Issue"
+                confirm: "Confirm & Issue",
+                create_channel_title: "Create New Channel",
+                channel_name_lbl: "Channel Name",
+                channel_type_lbl: "Channel Type",
+                channel_members_lbl: "Members (for private channels)",
+                channel_desc_lbl: "Channel Description",
+                create: "Create",
+                join: "Join",
+                leave: "Leave"
             }
         };
 
@@ -2315,7 +2412,12 @@ const DashboardHTML = `<!DOCTYPE html>
             identity: null,
             activeChannel: "",
             activeChatContact: "",
-            channels: [],
+            channels: [
+                { name: "general", type: "public", members: 156, lastMessage: "مرحباً بالجميع في القناة العامة!", lastTime: "منذ 5 دقائق" },
+                { name: "tech", type: "public", members: 89, lastMessage: "هل هناك تحديثات جديدة في المشروع؟", lastTime: "منذ 15 دقيقة" },
+                { name: "support", type: "public", members: 234, lastMessage: "تم حل المشكلة بنجاح", lastTime: "منذ ساعة" },
+                { name: "announcements", type: "public", members: 512, lastMessage: "إصدار جديد متاح الآن", lastTime: "منذ يومين" }
+            ],
             chatMessages: {},
             channelMessages: {},
             contacts: [
@@ -2984,37 +3086,57 @@ const DashboardHTML = `<!DOCTYPE html>
             if (!list) return;
             list.innerHTML = "";
 
+            // Use default channels for demo if API returns empty
+            let channels = state.channels;
+            
             const joined = await fetchAPI("/api/channels/list");
-            if (joined) {
-                state.channels = joined;
-                if (joined.length === 0) {
-                    list.innerHTML = '<div style="padding:1.5rem; text-align:center; color:var(--text-muted); font-size:0.8rem;">لم تنضم لأي قناة بعد</div>';
-                    return;
-                }
-
-                joined.forEach(ch => {
-                    const isActive = state.activeChannel === ch;
-                    const div = document.createElement('div');
-                    div.className = "chat-item-card" + (isActive ? " active" : "");
-                    div.onclick = () => openChannelRoom(ch);
-
-                    const avatar = document.createElement('div');
-                    avatar.className = "avatar-circle";
-                    avatar.style.width = "34px";
-                    avatar.style.height = "34px";
-                    avatar.style.background = "linear-gradient(135deg, var(--accent-purple), var(--accent-cyan))";
-                    avatar.innerText = ch.substring(0, 1).toUpperCase();
-
-                    const info = document.createElement('div');
-                    info.className = "chat-item-info";
-                    info.innerHTML = '<span class="chat-item-name"># ' + ch + '</span>' +
-                                     '<span class="chat-item-preview">GossipSub Channel</span>';
-                    
-                    div.appendChild(avatar);
-                    div.appendChild(info);
-                    list.appendChild(div);
-                });
+            if (joined && joined.length > 0) {
+                channels = joined;
             }
+
+            if (channels.length === 0) {
+                list.innerHTML = '<div style="padding:1.5rem; text-align:center; color:var(--text-muted); font-size:0.8rem;">لم تنضم لأي قناة بعد</div>';
+                return;
+            }
+
+            channels.forEach(ch => {
+                const channelName = typeof ch === 'string' ? ch : ch.name;
+                const isActive = state.activeChannel === channelName;
+                const channelData = typeof ch === 'object' ? ch : null;
+                const members = channelData?.members || 0;
+                const lastMessage = channelData?.lastMessage || "";
+                const lastTime = channelData?.lastTime || "";
+
+                const div = document.createElement('div');
+                div.className = "chat-item-card" + (isActive ? " active" : "");
+                div.onclick = () => openChannelRoom(channelName);
+
+                const avatar = document.createElement('div');
+                avatar.className = "avatar-circle";
+                avatar.style.width = "40px";
+                avatar.style.height = "40px";
+                avatar.style.background = "linear-gradient(135deg, var(--accent-emerald), var(--accent-cyan))";
+                avatar.style.fontSize = "1.1rem";
+                avatar.style.fontWeight = "800";
+                avatar.innerText = "#";
+
+                const info = document.createElement('div');
+                info.className = "chat-item-info";
+                info.style.flex = "1";
+                info.innerHTML = '<div class="flex-between" style="margin-bottom:0.25rem;">' +
+                                 '<span class="chat-item-name" style="font-weight:700; font-size:0.95rem;"># ' + channelName + '</span>' +
+                                 '<span style="font-size:0.7rem; color:var(--text-muted);">' + lastTime + '</span>' +
+                                 '</div>' +
+                                 '<span class="chat-item-preview" style="font-size:0.8rem; color:var(--text-muted);">' + lastMessage + '</span>' +
+                                 '<div class="flex-row-gap" style="margin-top:0.35rem; font-size:0.75rem; color:var(--accent-cyan);">' +
+                                 '<svg viewBox="0 0 24 24" style="width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:2;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>' +
+                                 '<span>' + members + ' عضو</span>' +
+                                 '</div>';
+                
+                div.appendChild(avatar);
+                div.appendChild(info);
+                list.appendChild(div);
+            });
         }
 
         async function executeJoinNewChannel() {
@@ -3050,6 +3172,76 @@ const DashboardHTML = `<!DOCTYPE html>
                 state.channelMessages[ch] = msgs;
                 renderChannelMessagesList(ch);
             }
+        }
+
+        // WhatsApp-style Channel Functions
+        function openCreateChannelModal() {
+            document.getElementById('modal-create-channel').style.display = 'flex';
+            document.getElementById('create-channel-type').onchange = function() {
+                document.getElementById('channel-members-group').style.display = 
+                    this.value === 'private' ? 'block' : 'none';
+            };
+        }
+
+        function closeCreateChannelModal() {
+            document.getElementById('modal-create-channel').style.display = 'none';
+            document.getElementById('create-channel-name').value = '';
+            document.getElementById('create-channel-desc').value = '';
+            document.getElementById('create-channel-members').value = '';
+        }
+
+        async function executeCreateChannel() {
+            const name = document.getElementById('create-channel-name').value.trim();
+            const type = document.getElementById('create-channel-type').value;
+            const desc = document.getElementById('create-channel-desc').value.trim();
+            const members = document.getElementById('create-channel-members').value.trim();
+
+            if (!name) {
+                showToast("يرجى إدخال اسم القناة", "error");
+                return;
+            }
+
+            showToast("جاري إنشاء القناة...", "warning");
+            
+            const payload = { channel_id: name };
+            if (type === 'private') {
+                payload.members = members ? members.split(',').map(m => m.trim()) : [];
+                payload.description = desc;
+            }
+
+            const res = await fetchAPI("/api/channels/create", "POST", payload);
+            if (res) {
+                showToast("تم إنشاء القناة #" + name + " بنجاح", "success");
+                closeCreateChannelModal();
+                await renderChannelsMenu();
+                openChannelRoom(name);
+            }
+        }
+
+        async function leaveCurrentChannel() {
+            if (!state.activeChannel) return;
+            
+            if (confirm("هل أنت متأكد من مغادرة القناة #" + state.activeChannel + "؟")) {
+                showToast("جاري مغادرة القناة...", "warning");
+                const res = await fetchAPI("/api/channels/leave", "POST", { channel_id: state.activeChannel });
+                if (res) {
+                    showToast("تم مغادرة القناة #" + state.activeChannel, "success");
+                    state.activeChannel = "";
+                    document.getElementById('channel-active-title').innerHTML = '<span data-tr="no_active_channel">لا توجد قناة نشطة</span>';
+                    document.getElementById('channel-header-actions').style.display = "none";
+                    document.getElementById('channel-input-row-container').style.display = "none";
+                    document.getElementById('channel-messages-box').innerHTML = '<div style="text-align:center; color:var(--text-muted); margin-top:6rem;" data-tr="channel_select_hint">اختر قناة من الشريط الجانبي أو انضم إلى قناة جديدة للمشاركة في نقاشات الشبكة العامة</div>';
+                    await renderChannelsMenu();
+                }
+            }
+        }
+
+        function toggleMuteChannel() {
+            showToast("تم كتم القناة مؤقتاً", "success");
+        }
+
+        function togglePinChannel() {
+            showToast("تم تثبيت القناة", "success");
         }
 
         function renderChannelMessagesList(ch) {

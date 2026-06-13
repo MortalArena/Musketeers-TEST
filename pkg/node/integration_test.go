@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multiaddr"
 	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
 	"github.com/MortalArena/Musketeers/pkg/identity"
 	"github.com/MortalArena/Musketeers/pkg/naming"
 	"github.com/MortalArena/Musketeers/pkg/node"
 	"github.com/MortalArena/Musketeers/pkg/protocol"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 )
 
 func init() {
@@ -119,7 +119,7 @@ func TestCommitRevealIntegration(t *testing.T) {
 	}
 	time.Sleep(2 * time.Second)
 
-	domain := "testsite.ia"
+	domain := "testsite.mskt"
 	secret, err := naming.GenerateSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestCommitRevealIntegration(t *testing.T) {
 	}
 
 	// المؤسس يسجّل عبر reveal
-	rec, err := nFounder.RegisterDomainReveal(ctx, domain, kpOwner.DID, secret, "did:ia:target", "did",
+	rec, err := nFounder.RegisterDomainReveal(ctx, domain, kpOwner.DID, secret, "did:mskt:target", "did",
 		time.Now().Add(365*24*time.Hour).Unix(), founderPriv)
 	if err != nil {
 		t.Fatalf("reveal-register failed: %v", err)
@@ -178,7 +178,7 @@ func TestGatewaySiteFlow(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 
-	html := []byte("<html><body><h1>Hello .ia</h1></body></html>")
+	html := []byte("<html><body><h1>Hello .mskt</h1></body></html>")
 	htmlCID, err := nOwner.PublishContent(ctx, html)
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestGatewaySiteFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	domain := "hello.ia"
+	domain := "hello.mskt"
 	exp := time.Now().Add(365 * 24 * time.Hour).Unix()
 	drec, err := naming.NewDomainRecord(domain, kp.DID, "cid:"+manifestCID, "cid", exp, founderPriv)
 	if err != nil {

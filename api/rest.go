@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/MortalArena/Musketeers/pkg/naming"
 	"github.com/MortalArena/Musketeers/pkg/node"
 	"github.com/MortalArena/Musketeers/pkg/protocol"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/sirupsen/logrus"
 )
 
@@ -36,7 +36,7 @@ func NewServer(n *node.Node, port int, log *logrus.Logger) *Server {
 	if _, err := rand.Read(tokenBytes); err != nil {
 		panic(err)
 	}
-	token := fmt.Sprintf("nr-%x", tokenBytes)
+	token := fmt.Sprintf("mskt-%x", tokenBytes)
 	s := &Server{
 		node:     n,
 		log:      log,
@@ -82,7 +82,7 @@ func (s *Server) Start() error {
 		s.log.Info("بدء الاستماع لقناة النظام الموحدة لمزامنة القنوات")
 
 		ctx := context.Background()
-		_, sub, err := s.node.JoinChannel(ctx, "_neuro_root_system_channels")
+		_, sub, err := s.node.JoinChannel(ctx, "_musketeers_system_channels")
 		if err != nil {
 			s.log.WithError(err).Warn("فشل الاشتراك في قناة النظام الموحدة")
 			return
@@ -99,7 +99,7 @@ func (s *Server) Start() error {
 				// If message is from someone else, join the channel mentioned in the content!
 				if chMsg.From != s.node.Identity().DID {
 					channelToJoin := strings.TrimSpace(chMsg.Content)
-					if channelToJoin != "" && channelToJoin != "_neuro_root_system_channels" {
+					if channelToJoin != "" && channelToJoin != "_musketeers_system_channels" {
 						s.log.Infof("تلقي إشعار مزامنة: الانضمام التلقائي للقناة #%s", channelToJoin)
 						if err := s.joinChannelAndListen(channelToJoin); err != nil {
 							s.log.WithError(err).Warnf("فشل الانضمام التلقائي للقناة %s", channelToJoin)
@@ -263,10 +263,10 @@ func (s *Server) handleACPTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ToDID   string      `json:"to_did"`
-		PeerID  string      `json:"peer_id"`
-		Task    string      `json:"task"`
-		Input   interface{} `json:"input"`
+		ToDID  string      `json:"to_did"`
+		PeerID string      `json:"peer_id"`
+		Task   string      `json:"task"`
+		Input  interface{} `json:"input"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "JSON غير صالح", http.StatusBadRequest)
@@ -462,11 +462,11 @@ func (s *Server) handleChannelsJoin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast the newly joined channel to other agents over the system channel (unless it is the system channel itself)
-	if req.ChannelID != "_neuro_root_system_channels" {
+	if req.ChannelID != "_musketeers_system_channels" {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			s.node.PublishChannelMessage(ctx, "_neuro_root_system_channels", req.ChannelID)
+			s.node.PublishChannelMessage(ctx, "_musketeers_system_channels", req.ChannelID)
 		}()
 	}
 

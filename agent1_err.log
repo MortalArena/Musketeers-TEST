@@ -1,9 +1,0 @@
-time="2026-06-12T08:35:05+03:00" level=warning msg="تم توليد مفاتيح مؤقتة — استخدم -init لإنشاء keystore دائم"
-time="2026-06-12T08:35:05+03:00" level=info msg="عقدة NeuroRoot جاهزة" acp="[ping echo translate task.execute]" addrs="[/ip4/127.0.0.1/tcp/4002/p2p/12D3KooWEV277XzLoNBtK4mGZBN4kRJUkTrwp8XZpk99zCw5YivQ /ip4/192.168.1.4/tcp/4002/p2p/12D3KooWEV277XzLoNBtK4mGZBN4kRJUkTrwp8XZpk99zCw5YivQ]" did="did:ia:8knUF9APrL5GUCvmPFVa7a" peer=12D3KooWEV277XzLoNBtK4mGZBN4kRJUkTrwp8XZpk99zCw5YivQ
-time="2026-06-12T08:35:05+03:00" level=info msg="REST API token (محلي فقط)" token=nr-29c67785a70db53c0648fad62b3249cfc85b125fc21f418dc207c2f9cae95119
-time="2026-06-12T08:35:05+03:00" level=info msg="بدء REST API" addr="127.0.0.1:8080"
-time="2026-06-12T08:35:06+03:00" level=info msg="بدء الاستماع لقناة النظام الموحدة لمزامنة القنوات"
-time="2026-06-12T08:35:12+03:00" level=info msg="تلقي إشعار مزامنة: الانضمام التلقائي للقناة #lobby"
-time="2026-06-12T08:35:12+03:00" level=info msg="بدء الاستماع للقناة: lobby"
-time="2026-06-12T08:35:26+03:00" level=info msg="بدء الاستماع للقناة: founder"
-time="2026-06-12T08:40:48+03:00" level=info msg="تلقي إشعار مزامنة: الانضمام التلقائي للقناة #founder"

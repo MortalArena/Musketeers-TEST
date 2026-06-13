@@ -11,11 +11,11 @@ func TestNormalizeDomainName(t *testing.T) {
 		input   string
 		wantErr bool
 	}{
-		{"example.ia", false},
-		{"my-site.ia", false},
+		{"example.mskt", false},
+		{"my-site.mskt", false},
 		{"example.com", true},
 		{"", true},
-		{"-bad.ia", true},
+		{"-bad.mskt", true},
 	}
 	for _, tt := range tests {
 		_, err := NormalizeDomainName(tt.input)
@@ -28,10 +28,10 @@ func TestNormalizeDomainName(t *testing.T) {
 func TestDomainRecordSignatures(t *testing.T) {
 	_, founderPriv, _ := ed25519.GenerateKey(nil)
 	ownerPub, ownerPriv, _ := ed25519.GenerateKey(nil)
-	ownerDID := "did:ia:testowner123456"
+	ownerDID := "did:mskt:testowner123456"
 
 	exp := time.Now().Add(365 * 24 * time.Hour).Unix()
-	rec, err := NewDomainRecord("test.ia", ownerDID, "target", "did", exp, founderPriv)
+	rec, err := NewDomainRecord("test.mskt", ownerDID, "target", "did", exp, founderPriv)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MortalArena/Musketeers/pkg/channel"
+	"github.com/MortalArena/Musketeers/pkg/content"
+	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
+	"github.com/MortalArena/Musketeers/pkg/identity"
+	"github.com/MortalArena/Musketeers/pkg/naming"
+	"github.com/MortalArena/Musketeers/pkg/node/subsystems"
+	nrproto "github.com/MortalArena/Musketeers/pkg/protocol"
+	"github.com/MortalArena/Musketeers/pkg/search"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -23,14 +31,6 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	tcp "github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
-	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
-	"github.com/MortalArena/Musketeers/pkg/identity"
-	"github.com/MortalArena/Musketeers/pkg/naming"
-	"github.com/MortalArena/Musketeers/pkg/node/subsystems"
-	nrproto "github.com/MortalArena/Musketeers/pkg/protocol"
-	"github.com/MortalArena/Musketeers/pkg/search"
-	"github.com/MortalArena/Musketeers/pkg/content"
-	"github.com/MortalArena/Musketeers/pkg/channel"
 	"github.com/sirupsen/logrus"
 )
 
@@ -103,7 +103,7 @@ func New(ctx context.Context, cfg *Config, kp *nrcrypto.KeyPair, idRec *identity
 		return nil, fmt.Errorf("فشل إنشاء libp2p host: %w", err)
 	}
 
-	crl := identity.NewCRLCache(24 * time.Hour)
+	crl := identity.NewCRLCache(365 * 24 * time.Hour)
 
 	var founderPub ed25519.PublicKey
 	if cfg.FounderPubHex != "" {

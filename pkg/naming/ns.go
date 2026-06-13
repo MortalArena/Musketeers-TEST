@@ -8,7 +8,8 @@ import (
 )
 
 const (
-	DomainSuffix    = ".ia"
+	DomainSuffix    = ".mskt"
+	GatewayDomain   = "mskt.run"
 	MaxDomainLength = 63
 	MaxProviders    = 32
 )
@@ -67,7 +68,7 @@ func hasMixedScript(s string) bool {
 }
 
 // DHTKeyPrefix بادئة مفاتيح DHT للنطاقات
-const DHTKeyPrefix = "/nr/domain/"
+const DHTKeyPrefix = "/mskt/domain/"
 
 // DHTKey يبني مفتاح DHT للنطاق
 func DHTKey(name string) string {
