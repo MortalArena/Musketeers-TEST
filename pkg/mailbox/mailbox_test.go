@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	"github.com/MortalArena/Musketeers/pkg/content"
+	"github.com/MortalArena/Musketeers/pkg/storage"
 )
 
 func TestMailbox_Send(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mb := NewMailbox(store)
 
 	senderDID := "did:mskt:sender"
@@ -22,7 +23,7 @@ func TestMailbox_Send(t *testing.T) {
 }
 
 func TestMailbox_Send_EmptyPlaintext(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mb := NewMailbox(store)
 
 	senderDID := "did:mskt:sender"
@@ -37,7 +38,7 @@ func TestMailbox_Send_EmptyPlaintext(t *testing.T) {
 }
 
 func TestMailbox_Send_EmptyRecipientKey(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mb := NewMailbox(store)
 
 	senderDID := "did:mskt:sender"
@@ -52,7 +53,7 @@ func TestMailbox_Send_EmptyRecipientKey(t *testing.T) {
 }
 
 func TestMailbox_Fetch(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mb := NewMailbox(store)
 
 	recipientDID := "did:mskt:recipient"
@@ -70,7 +71,7 @@ func TestMailbox_Fetch(t *testing.T) {
 }
 
 func TestMailbox_Fetch_EmptyRecipientDID(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mb := NewMailbox(store)
 
 	recipientDID := ""
@@ -87,7 +88,7 @@ func TestMailbox_Fetch_EmptyRecipientDID(t *testing.T) {
 }
 
 func TestMailbox_NewMailbox(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mb := NewMailbox(store)
 
 	if mb == nil {
@@ -100,7 +101,7 @@ func TestMailbox_NewMailbox(t *testing.T) {
 }
 
 func TestMailbox_Send_MultipleMessages(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mb := NewMailbox(store)
 
 	senderDID := "did:mskt:sender"

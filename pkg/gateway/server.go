@@ -19,7 +19,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Server بوابة HTTP لمواقع .ia
+// Server بوابة HTTP لمواقع .mskt
 type Server struct {
 	node   *node.Node
 	log    *logrus.Logger
@@ -27,7 +27,7 @@ type Server struct {
 }
 
 // NewServer ينشئ بوابة HTTP
-// المسارات: /d/{domain}.ia/{path} — عزل لكل نطاق (يمنع XSS cross-domain)
+// المسارات: /d/{domain}.mskt/{path} — عزل لكل نطاق (يمنع XSS cross-domain)
 func NewServer(n *node.Node, port int, log *logrus.Logger) *Server {
 	s := &Server{node: n, log: log}
 	mux := http.NewServeMux()
@@ -131,12 +131,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<!DOCTYPE html><html><head><title>Musketeers Gateway</title></head>
 <body><h1>Musketeers Gateway</h1>
-<p>استخدم: <code>/d/example.ia/</code> لزيارة موقع .ia</p>
+<p>استخدم: <code>/d/example.mskt/</code> لزيارة موقع .mskt</p>
 </body></html>`)
 }
 
 func (s *Server) handleSite(w http.ResponseWriter, r *http.Request) {
-	// /d/example.ia/path/to/file
+	// /d/example.mskt/path/to/file
 	rest := strings.TrimPrefix(r.URL.Path, "/d/")
 	if rest == "" {
 		http.Error(w, "اسم النطاق مطلوب", http.StatusBadRequest)
@@ -145,8 +145,8 @@ func (s *Server) handleSite(w http.ResponseWriter, r *http.Request) {
 
 	parts := strings.SplitN(rest, "/", 2)
 	domain := parts[0]
-	if !strings.HasSuffix(domain, ".ia") {
-		http.Error(w, "نطاق غير صالح — يجب أن ينتهي بـ .ia", http.StatusBadRequest)
+	if !strings.HasSuffix(domain, ".mskt") {
+		http.Error(w, "Invalid domain — must end with .mskt", http.StatusBadRequest)
 		return
 	}
 

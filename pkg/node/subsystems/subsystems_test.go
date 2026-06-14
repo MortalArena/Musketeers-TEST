@@ -4,10 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v4"
 	"github.com/MortalArena/Musketeers/pkg/content"
 	"github.com/MortalArena/Musketeers/pkg/identity"
 	"github.com/MortalArena/Musketeers/pkg/search"
+	"github.com/MortalArena/Musketeers/pkg/storage"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/sirupsen/logrus"
 )
 
@@ -17,7 +18,7 @@ func TestStorageSubsystem(t *testing.T) {
 		t.Fatalf("badger.Open returned error: %v", err)
 	}
 	defer db.Close()
-	store := content.NewBadgerBlockStore(db, 10)
+	store := content.NewBadgerBlockStore(db, storage.NewQuotaManager())
 	log := logrus.New()
 	provider := content.NewProviderManager(nil, nil, store, log)
 	fetcher := content.NewFetcher(nil, provider, store, log)

@@ -63,7 +63,7 @@ func (m *Mailbox) Send(senderDID, recipientDID string, plaintext []byte, recipie
 	}
 
 	cid := content.CIDFromData(data)
-	if err := m.store.Put(cid, data); err != nil {
+	if err := m.store.Put(cid, data, senderDID); err != nil {
 		return fmt.Errorf("failed to store message: %w", err)
 	}
 

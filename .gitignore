@@ -34,6 +34,9 @@ Thumbs.db
 data/
 seed-data/
 agent-data/
+studio-data/
+agent-data-*
+seed-data-*
 
 # Logs
 *.log

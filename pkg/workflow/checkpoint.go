@@ -32,7 +32,7 @@ func NewCheckpointManager(store content.BlockStore) *CheckpointManager {
 }
 
 // Save يحفظ حالة سير العمل بشكل آمن
-func (cm *CheckpointManager) Save(workflowID, nodeID string, state map[string]interface{}) error {
+func (cm *CheckpointManager) Save(workflowID, nodeID string, state map[string]interface{}, did string) error {
 	cp := &Checkpoint{
 		ID:         generateID(),
 		WorkflowID: workflowID,
@@ -56,14 +56,14 @@ func (cm *CheckpointManager) Save(workflowID, nodeID string, state map[string]in
 	}
 
 	cid := content.CIDFromData(data)
-	if err := cm.store.Put(cid, data); err != nil {
+	if err := cm.store.Put(cid, data, did); err != nil {
 		return fmt.Errorf("failed to store checkpoint: %w", err)
 	}
 
 	// 3. تحديث مؤشر "آخر نقطة حفظ" لهذا الـ Workflow
 	lastData := []byte(cid)
 	lastCID := content.CIDFromData(lastData)
-	if err := cm.store.Put(lastCID, lastData); err != nil {
+	if err := cm.store.Put(lastCID, lastData, did); err != nil {
 		return fmt.Errorf("failed to update latest checkpoint pointer: %w", err)
 	}
 
@@ -72,9 +72,33 @@ func (cm *CheckpointManager) Save(workflowID, nodeID string, state map[string]in
 
 // GetLatest يسترجع آخر حالة محفوظة بنجاح
 func (cm *CheckpointManager) GetLatest(workflowID string) (*Checkpoint, error) {
-	// في التنفيذ الحالي، سنستخدم تخزين بسيط في الذاكرة
-	// في الإنتاج، يجب استخدام قاعدة بيانات حقيقية
-	return nil, fmt.Errorf("not implemented in current version")
+	// 1. جلب مؤشر آخر checkpoint
+	lastKey := fmt.Sprintf("checkpoint:latest:%s", workflowID)
+	lastCIDBytes, err := cm.store.Get(lastKey)
+	if err != nil {
+		return nil, fmt.Errorf("no checkpoints found for workflow %s: %w", workflowID, err)
+	}
+
+	// 2. جلب الـ checkpoint الفعلي
+	data, err := cm.store.Get(string(lastCIDBytes))
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint data not found: %w", err)
+	}
+
+	// 3. فك التشفير
+	var cp Checkpoint
+	if err := json.Unmarshal(data, &cp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal checkpoint: %w", err)
+	}
+
+	// 4. التحقق من سلامة البيانات
+	stateBytes, _ := json.Marshal(cp.State)
+	hash := sha256.Sum256(stateBytes)
+	if hex.EncodeToString(hash[:]) != cp.Hash {
+		return nil, fmt.Errorf("checkpoint integrity check failed")
+	}
+
+	return &cp, nil
 }
 
 func generateID() string {

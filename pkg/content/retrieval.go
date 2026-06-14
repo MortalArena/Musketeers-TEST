@@ -29,7 +29,7 @@ func NewFetcher(h host.Host, pm *ProviderManager, store BlockStore, log *logrus.
 }
 
 // FetchContent يجلب محتوى بالـ CID
-func (f *Fetcher) FetchContent(ctx context.Context, cid string) ([]byte, error) {
+func (f *Fetcher) FetchContent(ctx context.Context, cid string, did string) ([]byte, error) {
 	// 1. بحث محلي
 	data, err := f.store.Get(cid)
 	if err == nil {
@@ -71,7 +71,7 @@ func (f *Fetcher) FetchContent(ctx context.Context, cid string) ([]byte, error) 
 	for res := range resultCh {
 		if res.err == nil {
 			// 4. تخزين محلي وإعادة توفير
-			if putErr := f.store.Put(cid, res.data); putErr != nil {
+			if putErr := f.store.Put(cid, res.data, did); putErr != nil {
 				f.log.WithError(putErr).Warn("فشل تخزين الكتلة محلياً")
 			}
 			if provErr := f.provider.AddProvider(ctx, cid); provErr != nil {

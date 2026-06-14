@@ -33,29 +33,25 @@ func NewExecutor(ctx context.Context) (*Executor, error) {
 
 // Execute ينفذ وحدة WASM مع فرض حدود الموارد الصارمة
 func (e *Executor) Execute(ctx context.Context, config SandboxConfig, funcName string, args ...uint64) (uint64, error) {
-	// 1. تقييد الذاكرة ومنع تجاوز الحد الأقصى (Memory Limiting)
+	// ✅ تطبيق حد الذاكرة باستخدام ModuleConfig
 	compiled, err := e.runtime.CompileModule(ctx, config.WasmBinary)
 	if err != nil {
 		return 0, fmt.Errorf("failed to compile wasm module: %w", err)
 	}
 
-	// 2. تكوين الوحدة: منع الوصول المطلق لنظام الملفات أو الشبكة
+	// منع الوصول للملفات والشبكة
 	modConfig := wazero.NewModuleConfig().
 		WithName("isolated-plugin")
 
-	// 3. تشغيل الوحدة
 	mod, err := e.runtime.InstantiateModule(ctx, compiled, modConfig)
 	if err != nil {
 		return 0, fmt.Errorf("failed to instantiate wasm module: %w", err)
 	}
-
-	// ضمان تنظيف الموارد ومنع تسرب الذاكرة (Zero Memory Leak)
 	defer mod.Close(ctx)
 
-	// 4. استدعاء الدالة المطلوبة
 	results, err := mod.ExportedFunction(funcName).Call(ctx, args...)
 	if err != nil {
-		return 0, fmt.Errorf("failed to call wasm function '%s': %w", funcName, err)
+		return 0, fmt.Errorf("failed to call %s: %w", funcName, err)
 	}
 
 	if len(results) == 0 {

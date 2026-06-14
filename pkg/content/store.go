@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/dgraph-io/badger/v4"
 	"github.com/MortalArena/Musketeers/pkg/protocol"
+	"github.com/MortalArena/Musketeers/pkg/storage"
+	"github.com/dgraph-io/badger/v4"
 )
 
 // BlockStore واجهة تخزين الكتل
 type BlockStore interface {
 	Get(cid string) ([]byte, error)
-	Put(cid string, data []byte) error
+	Put(cid string, data []byte, did string) error
 	Size() int64
 }
 
@@ -37,16 +38,16 @@ type BadgerBlockStore struct {
 	db       *badger.DB
 	mu       sync.RWMutex
 	size     int64
-	quota    int64 // بالبايت
+	quotaMgr *storage.QuotaManager // ✅ ربط بـ QuotaManager الموحد
 	prefix   []byte
 }
 
 // NewBadgerBlockStore ينشئ مخزن كتل
-func NewBadgerBlockStore(db *badger.DB, quotaMB int64) *BadgerBlockStore {
+func NewBadgerBlockStore(db *badger.DB, qm *storage.QuotaManager) *BadgerBlockStore {
 	return &BadgerBlockStore{
-		db:     db,
-		quota:  quotaMB * 1024 * 1024,
-		prefix: []byte("block:"),
+		db:       db,
+		quotaMgr: qm,
+		prefix:   []byte("block:"),
 	}
 }
 
@@ -77,7 +78,7 @@ func (s *BadgerBlockStore) Get(cid string) ([]byte, error) {
 }
 
 // Put يخزّن كتلة
-func (s *BadgerBlockStore) Put(cid string, data []byte) error {
+func (s *BadgerBlockStore) Put(cid string, data []byte, did string) error {
 	if len(data) > protocol.MaxBlockSize {
 		return fmt.Errorf("حجم الكتلة يتجاوز الحد (%d)", protocol.MaxBlockSize)
 	}
@@ -85,18 +86,21 @@ func (s *BadgerBlockStore) Put(cid string, data []byte) error {
 		return err
 	}
 
+	// ✅ استخدام QuotaManager الموحد للتحقق من الحصة
+	if err := s.quotaMgr.CheckAndAdd(did, int64(len(data))); err != nil {
+		return fmt.Errorf("quota check failed: %w", err)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if s.quota > 0 && s.size+int64(len(data)) > s.quota {
-		return fmt.Errorf("تجاوز حصة التخزين")
-	}
 
 	err := s.db.Update(func(txn *badger.Txn) error {
 		return txn.Set(s.blockKey(cid), data)
 	})
 	if err != nil {
-		return err
+		// في حالة الفشل، يجب تحرير المساحة المحجوزة
+		s.quotaMgr.Release(did, int64(len(data)))
+		return fmt.Errorf("failed to store block: %w", err)
 	}
 	s.size += int64(len(data))
 	return nil
@@ -111,17 +115,17 @@ func (s *BadgerBlockStore) Size() int64 {
 
 // MemoryBlockStore مخزن في الذاكرة للاختبارات
 type MemoryBlockStore struct {
-	mu    sync.RWMutex
-	blocks map[string][]byte
-	size   int64
-	quota  int64
+	mu       sync.RWMutex
+	blocks   map[string][]byte
+	size     int64
+	quotaMgr *storage.QuotaManager // ✅ ربط بـ QuotaManager الموحد
 }
 
 // NewMemoryBlockStore ينشئ مخزن ذاكرة
-func NewMemoryBlockStore(quotaMB int64) *MemoryBlockStore {
+func NewMemoryBlockStore(qm *storage.QuotaManager) *MemoryBlockStore {
 	return &MemoryBlockStore{
-		blocks: make(map[string][]byte),
-		quota:  quotaMB * 1024 * 1024,
+		blocks:   make(map[string][]byte),
+		quotaMgr: qm,
 	}
 }
 
@@ -135,18 +139,21 @@ func (s *MemoryBlockStore) Get(cid string) ([]byte, error) {
 	return append([]byte(nil), data...), nil
 }
 
-func (s *MemoryBlockStore) Put(cid string, data []byte) error {
+func (s *MemoryBlockStore) Put(cid string, data []byte, did string) error {
 	if len(data) > protocol.MaxBlockSize {
 		return fmt.Errorf("حجم الكتلة يتجاوز الحد")
 	}
 	if err := VerifyCID(cid, data); err != nil {
 		return err
 	}
+
+	// ✅ استخدام QuotaManager الموحد للتحقق من الحصة
+	if err := s.quotaMgr.CheckAndAdd(did, int64(len(data))); err != nil {
+		return fmt.Errorf("quota check failed: %w", err)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.quota > 0 && s.size+int64(len(data)) > s.quota {
-		return fmt.Errorf("تجاوز حصة التخزين")
-	}
 	s.blocks[cid] = append([]byte(nil), data...)
 	s.size += int64(len(data))
 	return nil

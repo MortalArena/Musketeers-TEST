@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/MortalArena/Musketeers/api"
+	"github.com/MortalArena/Musketeers/pkg/agent_bridge"
 	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
 	"github.com/MortalArena/Musketeers/pkg/identity"
 	"github.com/MortalArena/Musketeers/pkg/naming"
 	"github.com/MortalArena/Musketeers/pkg/node"
+	"github.com/MortalArena/Musketeers/pkg/storage"
 	"github.com/sirupsen/logrus"
 )
 
@@ -25,6 +27,7 @@ func main() {
 	dataDir := flag.String("data", "", "مجلد البيانات")
 	port := flag.Int("port", 0, "منفذ الاستماع")
 	restPort := flag.Int("rest", 0, "منفذ REST API (0 = تعطيل)")
+	bridgePort := flag.Int("bridge", 5001, "منفذ Agent Bridge")
 	bootstrap := flag.String("bootstrap", "", "عنوان bootstrap peer")
 	initKeystore := flag.Bool("init", false, "إنشاء keystore جديد مع mnemonic")
 	commitDomain := flag.String("commit-domain", "", "نشر التزام لنطاق (commit-reveal)")
@@ -110,6 +113,22 @@ func main() {
 			}
 		}()
 	}
+
+	// ✅ إعداد Agent Bridge
+	qm := storage.NewQuotaManager()
+	qm.SetLimit(kp.DID, 2*1024*1024*1024) // 2GB لكل وكيل
+
+	sessionMgr := agent_bridge.NewSessionManager(log)
+	multiplexedBrg := agent_bridge.NewMultiplexedBridge(log)
+	bridgeAddr := fmt.Sprintf("127.0.0.1:%d", *bridgePort)
+	bridgeServer := agent_bridge.NewServer(bridgeAddr, sessionMgr, multiplexedBrg, log)
+
+	if err := bridgeServer.Start(ctx); err != nil {
+		log.WithError(err).Fatal("فشل بدء Agent Bridge")
+	}
+	defer bridgeServer.Stop()
+
+	log.WithField("addr", bridgeAddr).Info("Agent Bridge بدأ")
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

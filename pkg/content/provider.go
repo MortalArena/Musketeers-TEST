@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/MortalArena/Musketeers/pkg/protocol"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/MortalArena/Musketeers/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -35,9 +35,9 @@ func NewProviderManager(h host.Host, kad *dht.IpfsDHT, store BlockStore, log *lo
 }
 
 // PublishContent يخزّن كتلة ويسجّل نفسه كموفر
-func (pm *ProviderManager) PublishContent(ctx context.Context, data []byte) (string, error) {
+func (pm *ProviderManager) PublishContent(ctx context.Context, data []byte, did string) (string, error) {
 	cid := CIDFromData(data)
-	if err := pm.store.Put(cid, data); err != nil {
+	if err := pm.store.Put(cid, data, did); err != nil {
 		return "", fmt.Errorf("فشل تخزين الكتلة: %w", err)
 	}
 	if err := pm.AddProvider(ctx, cid); err != nil {

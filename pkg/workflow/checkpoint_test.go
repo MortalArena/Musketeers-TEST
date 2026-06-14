@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/content"
+	"github.com/MortalArena/Musketeers/pkg/storage"
 )
 
 func TestCheckpointManager_Save(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -19,28 +20,28 @@ func TestCheckpointManager_Save(t *testing.T) {
 		"var2": 42,
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_EmptyState(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
 	nodeID := "node-456"
 	state := map[string]interface{}{}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with empty state failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_MultipleCheckpoints(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -50,7 +51,7 @@ func TestCheckpointManager_Save_MultipleCheckpoints(t *testing.T) {
 		state := map[string]interface{}{
 			"step": i,
 		}
-		err := cm.Save(workflowID, nodeID, state)
+		err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 		if err != nil {
 			t.Fatalf("Save failed for checkpoint %d: %v", i, err)
 		}
@@ -58,7 +59,7 @@ func TestCheckpointManager_Save_MultipleCheckpoints(t *testing.T) {
 }
 
 func TestCheckpointManager_GetLatest(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	// في الإصدار الحالي، GetLatest غير منفذ
@@ -69,7 +70,7 @@ func TestCheckpointManager_GetLatest(t *testing.T) {
 }
 
 func TestCheckpointManager_GetLatest_NotFound(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	_, err := cm.GetLatest("nonexistent-workflow")
@@ -79,7 +80,7 @@ func TestCheckpointManager_GetLatest_NotFound(t *testing.T) {
 }
 
 func TestNewCheckpointManager(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	if cm == nil {
@@ -132,7 +133,7 @@ func TestGenerateID(t *testing.T) {
 }
 
 func TestCheckpointManager_Save_ComplexState(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -145,14 +146,14 @@ func TestCheckpointManager_Save_ComplexState(t *testing.T) {
 		"var5": map[string]int{"x": 1, "y": 2},
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with complex state failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_LargeState(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -162,84 +163,84 @@ func TestCheckpointManager_Save_LargeState(t *testing.T) {
 		state[fmt.Sprintf("key-%d", i)] = fmt.Sprintf("value-%d", i)
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with large state failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_NilState(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
 	nodeID := "node-456"
 	var state map[string]interface{} = nil
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with nil state failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_EmptyWorkflowID(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := ""
 	nodeID := "node-456"
 	state := map[string]interface{}{"key": "value"}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with empty workflow ID failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_EmptyNodeID(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
 	nodeID := ""
 	state := map[string]interface{}{"key": "value"}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with empty node ID failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithSpecialCharsInIDs(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123!@#$%^&*()"
 	nodeID := "node-456-<>?/\\"
 	state := map[string]interface{}{"key": "value"}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with special chars in IDs failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithUnicodeInIDs(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123-مربا-世界"
 	nodeID := "node-456-مرحبا"
 	state := map[string]interface{}{"key": "value"}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with unicode in IDs failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithLongIDs(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	longID := ""
@@ -251,14 +252,14 @@ func TestCheckpointManager_Save_WithLongIDs(t *testing.T) {
 	nodeID := longID
 	state := map[string]interface{}{"key": "value"}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with long IDs failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithStateContainingNil(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -269,14 +270,14 @@ func TestCheckpointManager_Save_WithStateContainingNil(t *testing.T) {
 		"key3": "value3",
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with state containing nil failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithStateContainingFloats(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -287,14 +288,14 @@ func TestCheckpointManager_Save_WithStateContainingFloats(t *testing.T) {
 		"sqrt2": 1.41421,
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with state containing floats failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithStateContainingNegativeNumbers(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -305,14 +306,14 @@ func TestCheckpointManager_Save_WithStateContainingNegativeNumbers(t *testing.T)
 		"neg3": -9999,
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with state containing negative numbers failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithStateContainingNestedMaps(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -325,14 +326,14 @@ func TestCheckpointManager_Save_WithStateContainingNestedMaps(t *testing.T) {
 		},
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with state containing nested maps failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithStateContainingArrays(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -343,14 +344,14 @@ func TestCheckpointManager_Save_WithStateContainingArrays(t *testing.T) {
 		"array3": []interface{}{1, "two", 3.0, true},
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with state containing arrays failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithStateContainingUnicode(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -361,14 +362,14 @@ func TestCheckpointManager_Save_WithStateContainingUnicode(t *testing.T) {
 		"emoji":   "🌍🌎🌏",
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with state containing unicode failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithStateContainingSpecialChars(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -379,14 +380,14 @@ func TestCheckpointManager_Save_WithStateContainingSpecialChars(t *testing.T) {
 		"quote":   `he said "hello"`,
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with state containing special chars failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithStateContainingZeroValues(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -398,7 +399,7 @@ func TestCheckpointManager_Save_WithStateContainingZeroValues(t *testing.T) {
 		"false_bool": false,
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with state containing zero values failed: %v", err)
 	}
@@ -409,7 +410,7 @@ type MockBlockStore struct {
 	callCount int
 }
 
-func (m *MockBlockStore) Put(cid string, data []byte) error {
+func (m *MockBlockStore) Put(cid string, data []byte, did string) error {
 	m.callCount++
 	if m.putError && m.callCount >= 2 {
 		return fmt.Errorf("mock store error")
@@ -433,14 +434,14 @@ func TestCheckpointManager_Save_WithStoreError(t *testing.T) {
 	nodeID := "node-456"
 	state := map[string]interface{}{"key": "value"}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err == nil {
 		t.Error("Expected error when store fails")
 	}
 }
 
 func TestCheckpointManager_Save_WithVeryLargeState(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -450,14 +451,14 @@ func TestCheckpointManager_Save_WithVeryLargeState(t *testing.T) {
 		state[fmt.Sprintf("key-%d", i)] = fmt.Sprintf("value-%d", i)
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with very large state failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithDeeplyNestedState(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -474,14 +475,14 @@ func TestCheckpointManager_Save_WithDeeplyNestedState(t *testing.T) {
 		},
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with deeply nested state failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithMixedTypes(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -496,14 +497,14 @@ func TestCheckpointManager_Save_WithMixedTypes(t *testing.T) {
 		"map":    map[string]string{"a": "b"},
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with mixed types failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithEmptyStrings(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -514,14 +515,14 @@ func TestCheckpointManager_Save_WithEmptyStrings(t *testing.T) {
 		"empty3": "",
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with empty strings failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithLargeStrings(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -534,14 +535,14 @@ func TestCheckpointManager_Save_WithLargeStrings(t *testing.T) {
 		"large": largeString,
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with large strings failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithBooleanValues(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -553,14 +554,14 @@ func TestCheckpointManager_Save_WithBooleanValues(t *testing.T) {
 		"false2": false,
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with boolean values failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithIntegerValues(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -571,14 +572,14 @@ func TestCheckpointManager_Save_WithIntegerValues(t *testing.T) {
 		"large":  1000000,
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with integer values failed: %v", err)
 	}
 }
 
 func TestCheckpointManager_Save_WithFloatValues(t *testing.T) {
-	store := content.NewMemoryBlockStore(100)
+	store := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	cm := NewCheckpointManager(store)
 
 	workflowID := "workflow-123"
@@ -589,7 +590,7 @@ func TestCheckpointManager_Save_WithFloatValues(t *testing.T) {
 		"large":  1000.999,
 	}
 
-	err := cm.Save(workflowID, nodeID, state)
+	err := cm.Save(workflowID, nodeID, state, "did:mskt:test")
 	if err != nil {
 		t.Fatalf("Save with float values failed: %v", err)
 	}

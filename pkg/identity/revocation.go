@@ -53,7 +53,7 @@ func (rec *RevocationRecord) Verify(pub ed25519.PublicKey) error {
 
 // DHTKey مفتاح DHT للإلغاء
 func (rec *RevocationRecord) DHTKey() string {
-	return "/nr/revoke/" + rec.DID
+	return "/mskt/revoke/" + rec.DID
 }
 
 // CRLCache ذاكرة تخزين مؤقت لسجلات الإلغاء

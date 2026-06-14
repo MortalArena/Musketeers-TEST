@@ -9,6 +9,7 @@ import (
 
 	"github.com/MortalArena/Musketeers/pkg/content"
 	"github.com/MortalArena/Musketeers/pkg/mailbox"
+	"github.com/MortalArena/Musketeers/pkg/storage"
 )
 
 // MockMailbox للتجربة
@@ -31,7 +32,7 @@ func (m *MockMailbox) Send(sender, recipient string, payload, pubKey []byte) err
 
 func TestWebhookRouter_ProcessWebhook(t *testing.T) {
 	secret := "super_secret_webhook_key"
-	mockStore := content.NewMemoryBlockStore(100)
+	mockStore := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mockMb := mailbox.NewMailbox(mockStore)
 	router := NewWebhookRouter(secret, mockMb)
 
@@ -54,7 +55,7 @@ func TestWebhookRouter_ProcessWebhook(t *testing.T) {
 
 func TestWebhookRouter_ProcessWebhook_InvalidSignature(t *testing.T) {
 	secret := "super_secret_webhook_key"
-	mockStore := content.NewMemoryBlockStore(100)
+	mockStore := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mockMb := mailbox.NewMailbox(mockStore)
 	router := NewWebhookRouter(secret, mockMb)
 
@@ -71,7 +72,7 @@ func TestWebhookRouter_ProcessWebhook_InvalidSignature(t *testing.T) {
 
 func TestWebhookRouter_VerifySignature(t *testing.T) {
 	secret := "super_secret_webhook_key"
-	mockStore := content.NewMemoryBlockStore(100)
+	mockStore := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mockMb := mailbox.NewMailbox(mockStore)
 	router := NewWebhookRouter(secret, mockMb)
 
@@ -108,7 +109,7 @@ func TestWebhookRouter_VerifySignature(t *testing.T) {
 
 func TestWebhookRouter_EmptyPayload(t *testing.T) {
 	secret := "super_secret_webhook_key"
-	mockStore := content.NewMemoryBlockStore(100)
+	mockStore := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mockMb := mailbox.NewMailbox(mockStore)
 	router := NewWebhookRouter(secret, mockMb)
 
@@ -128,7 +129,7 @@ func TestWebhookRouter_EmptyPayload(t *testing.T) {
 
 func TestWebhookRouter_LargePayload(t *testing.T) {
 	secret := "super_secret_webhook_key"
-	mockStore := content.NewMemoryBlockStore(100)
+	mockStore := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mockMb := mailbox.NewMailbox(mockStore)
 	router := NewWebhookRouter(secret, mockMb)
 
@@ -152,7 +153,7 @@ func TestWebhookRouter_LargePayload(t *testing.T) {
 
 func TestWebhookRouter_SpecialCharactersInPayload(t *testing.T) {
 	secret := "super_secret_webhook_key"
-	mockStore := content.NewMemoryBlockStore(100)
+	mockStore := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mockMb := mailbox.NewMailbox(mockStore)
 	router := NewWebhookRouter(secret, mockMb)
 
@@ -182,7 +183,7 @@ func TestWebhookRouter_DifferentSecretKeys(t *testing.T) {
 	sig1 := "sha256=" + hex.EncodeToString(mac1.Sum(nil))
 
 	// إنشاء router باستخدام secret2
-	mockStore := content.NewMemoryBlockStore(100)
+	mockStore := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mockMb := mailbox.NewMailbox(mockStore)
 	router := NewWebhookRouter(secret2, mockMb)
 
@@ -195,7 +196,7 @@ func TestWebhookRouter_DifferentSecretKeys(t *testing.T) {
 
 func TestWebhookRouter_EmptySignature(t *testing.T) {
 	secret := "super_secret_webhook_key"
-	mockStore := content.NewMemoryBlockStore(100)
+	mockStore := content.NewMemoryBlockStore(storage.NewQuotaManager())
 	mockMb := mailbox.NewMailbox(mockStore)
 	router := NewWebhookRouter(secret, mockMb)
 

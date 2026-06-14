@@ -18,6 +18,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/node/subsystems"
 	nrproto "github.com/MortalArena/Musketeers/pkg/protocol"
 	"github.com/MortalArena/Musketeers/pkg/search"
+	"github.com/MortalArena/Musketeers/pkg/storage"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -156,7 +157,7 @@ func New(ctx context.Context, cfg *Config, kp *nrcrypto.KeyPair, idRec *identity
 		return nil, fmt.Errorf("فشل إنشاء PubSub: %w", err)
 	}
 
-	blockStore := content.NewBadgerBlockStore(db, cfg.StorageQuotaMB)
+	blockStore := content.NewBadgerBlockStore(db, storage.NewQuotaManager())
 	provider := content.NewProviderManager(h, kad, blockStore, log)
 	fetcher := content.NewFetcher(h, provider, blockStore, log)
 	nonceStore := NewNonceStore(db, time.Hour)
@@ -344,9 +345,9 @@ func (n *Node) ResolvePublicKey(did string) (ed25519.PublicKey, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	val, err := n.dht().GetValue(ctx, "/nr/identity/"+did)
+	val, err := n.dht().GetValue(ctx, "/mskt/identity/"+did)
 	if err != nil {
-		return nil, fmt.Errorf("الهوية غير موجودة: %w", err)
+		return nil, fmt.Errorf("failed to resolve public key: %w", err)
 	}
 	var rec identity.IdentityRecord
 	if err := json.Unmarshal(val, &rec); err != nil {
@@ -379,7 +380,7 @@ func (n *Node) IsRevoked(ctx context.Context, did string) bool {
 	if n.crl().IsRevoked(did) {
 		return true
 	}
-	val, err := n.dht().GetValue(ctx, "/nr/revoke/"+did)
+	val, err := n.dht().GetValue(ctx, "/mskt/revoke/"+did)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return false
@@ -518,12 +519,12 @@ func (n *Node) SendDirectToPeer(ctx context.Context, pid peer.ID, toDID string, 
 
 // PublishContent ينشر محتوى
 func (n *Node) PublishContent(ctx context.Context, data []byte) (string, error) {
-	return n.provider().PublishContent(ctx, data)
+	return n.provider().PublishContent(ctx, data, n.keyPair().DID)
 }
 
 // FetchContent يجلب محتوى
 func (n *Node) FetchContent(ctx context.Context, cid string) ([]byte, error) {
-	return n.fetcher().FetchContent(ctx, cid)
+	return n.fetcher().FetchContent(ctx, cid, n.keyPair().DID)
 }
 
 // Close يغلق العقدة
