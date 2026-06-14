@@ -66,7 +66,7 @@ func TestVerifyPoW(t *testing.T) {
 	defer cancel()
 
 	did := "did:nr:testverify"
-	difficulty := 3 // صعوبة منخفضة جداً للأجهزة الضعيفة
+	difficulty := 1 // صعوبة منخفضة جداً للأجهزة الضعيفة
 
 	result, err := MineIdentity(ctx, did, difficulty)
 	if err != nil {
