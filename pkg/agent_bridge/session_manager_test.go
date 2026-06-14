@@ -16,7 +16,7 @@ func TestSessionManager_Register(t *testing.T) {
 	defer conn1.Close()
 	defer conn2.Close()
 
-	session := NewSession("session-123", conn1, log)
+	session := NewSession("session-123", conn1, "agent-1", log)
 
 	err := sm.Register(session)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestSessionManager_Register_Duplicate(t *testing.T) {
 	defer conn1.Close()
 	defer conn2.Close()
 
-	session := NewSession("session-123", conn1, log)
+	session := NewSession("session-123", conn1, "agent-1", log)
 
 	err := sm.Register(session)
 	if err != nil {
@@ -60,7 +60,7 @@ func TestSessionManager_Get(t *testing.T) {
 	defer conn1.Close()
 	defer conn2.Close()
 
-	session := NewSession("session-123", conn1, log)
+	session := NewSession("session-123", conn1, "agent-1", log)
 
 	err := sm.Register(session)
 	if err != nil {
@@ -96,7 +96,7 @@ func TestSessionManager_Unregister(t *testing.T) {
 	defer conn1.Close()
 	defer conn2.Close()
 
-	session := NewSession("session-123", conn1, log)
+	session := NewSession("session-123", conn1, "agent-1", log)
 
 	err := sm.Register(session)
 	if err != nil {
@@ -123,8 +123,8 @@ func TestSessionManager_GetAll(t *testing.T) {
 	defer conn3.Close()
 	defer conn4.Close()
 
-	session1 := NewSession("session-1", conn1, log)
-	session2 := NewSession("session-2", conn3, log)
+	session1 := NewSession("session-1", conn1, "agent-1", log)
+	session2 := NewSession("session-2", conn3, "agent-2", log)
 
 	sm.Register(session1)
 	sm.Register(session2)
@@ -149,7 +149,7 @@ func TestSessionManager_Count(t *testing.T) {
 	defer conn1.Close()
 	defer conn2.Close()
 
-	session := NewSession("session-123", conn1, log)
+	session := NewSession("session-123", conn1, "agent-1", log)
 	sm.Register(session)
 
 	count = sm.Count()
@@ -170,8 +170,8 @@ func TestSessionManager_CloseAll(t *testing.T) {
 	defer conn3.Close()
 	defer conn4.Close()
 
-	session1 := NewSession("session-1", conn1, log)
-	session2 := NewSession("session-2", conn3, log)
+	session1 := NewSession("session-1", conn1, "agent-1", log)
+	session2 := NewSession("session-2", conn3, "agent-2", log)
 
 	sm.Register(session1)
 	sm.Register(session2)
@@ -181,5 +181,43 @@ func TestSessionManager_CloseAll(t *testing.T) {
 	count := sm.Count()
 	if count != 0 {
 		t.Errorf("Expected 0 sessions, got %d", count)
+	}
+}
+
+func TestSessionManager_GetOrCreate(t *testing.T) {
+	log := logrus.New()
+	sm := NewSessionManager(log)
+
+	// إنشاء اتصال وهمي
+	conn1, conn2 := net.Pipe()
+	defer conn1.Close()
+	defer conn2.Close()
+
+	// إنشاء جلسة جديدة
+	session1 := sm.GetOrCreate("agent-1", conn1)
+	if session1 == nil {
+		t.Fatal("Expected non-nil session")
+	}
+	if session1.AgentID() != "agent-1" {
+		t.Errorf("Expected agent ID agent-1, got %s", session1.AgentID())
+	}
+
+	count := sm.Count()
+	if count != 1 {
+		t.Errorf("Expected 1 session, got %d", count)
+	}
+
+	// إعادة استخدام الجلسة الموجودة
+	session2 := sm.GetOrCreate("agent-1", conn1)
+	if session2 == nil {
+		t.Fatal("Expected non-nil session")
+	}
+	if session2.ID() != session1.ID() {
+		t.Errorf("Expected same session ID, got %s vs %s", session2.ID(), session1.ID())
+	}
+
+	count = sm.Count()
+	if count != 1 {
+		t.Errorf("Expected 1 session, got %d", count)
 	}
 }

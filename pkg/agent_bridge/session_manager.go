@@ -11,17 +11,19 @@ import (
 
 // Session يمثل جلسة اتصال مع وكيل
 type Session struct {
-	id            string
-	conn          net.Conn
-	lastActivity  time.Time
-	mu            sync.RWMutex
-	log           *logrus.Logger
+	id           string
+	agentID      string
+	conn         net.Conn
+	lastActivity time.Time
+	mu           sync.RWMutex
+	log          *logrus.Logger
 }
 
 // NewSession ينشئ جلسة جديدة
-func NewSession(id string, conn net.Conn, log *logrus.Logger) *Session {
+func NewSession(id string, conn net.Conn, agentID string, log *logrus.Logger) *Session {
 	return &Session{
 		id:           id,
+		agentID:      agentID,
 		conn:         conn,
 		lastActivity: time.Now(),
 		log:          log,
@@ -31,6 +33,11 @@ func NewSession(id string, conn net.Conn, log *logrus.Logger) *Session {
 // ID يرجع معرف الجلسة
 func (s *Session) ID() string {
 	return s.id
+}
+
+// AgentID يرجع معرف الوكيل
+func (s *Session) AgentID() string {
+	return s.agentID
 }
 
 // Conn يرجع اتصال الجلسة
@@ -83,6 +90,28 @@ func (sm *SessionManager) Register(session *Session) error {
 	sm.sessions[session.ID()] = session
 	sm.log.WithField("session_id", session.ID()).Info("Session registered")
 	return nil
+}
+
+// GetOrCreate يجلب جلسة موجودة أو ينشئ واحدة جديدة
+func (sm *SessionManager) GetOrCreate(agentID string, conn net.Conn) *Session {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	// ابحث عن جلسة موجودة لنفس الوكيل
+	for _, session := range sm.sessions {
+		if session.AgentID() == agentID {
+			session.UpdateLastActivity()
+			sm.log.WithField("session_id", session.ID()).WithField("agent_id", agentID).Info("Reusing existing session")
+			return session
+		}
+	}
+
+	// أنشئ جلسة جديدة
+	sessionID := generateSessionID()
+	session := NewSession(sessionID, conn, agentID, sm.log)
+	sm.sessions[sessionID] = session
+	sm.log.WithField("session_id", sessionID).WithField("agent_id", agentID).Info("Created new session")
+	return session
 }
 
 // Unregister يلغي تسجيل جلسة

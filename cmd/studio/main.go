@@ -84,7 +84,7 @@ func main() {
 	multiplexedBrg := agent_bridge.NewMultiplexedBridge(log)
 
 	// إنشاء خادم الجسر
-	bridgeServer := agent_bridge.NewServer(*agentAddr, sessionMgr, multiplexedBrg, log)
+	bridgeServer := agent_bridge.NewServer(n, *agentAddr, sessionMgr, multiplexedBrg, log)
 	if err := bridgeServer.Start(ctx); err != nil {
 		log.WithError(err).Fatal("Failed to start bridge server")
 	}

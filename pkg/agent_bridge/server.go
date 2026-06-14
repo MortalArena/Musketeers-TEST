@@ -7,25 +7,28 @@ import (
 	"sync"
 
 	"github.com/MortalArena/Musketeers/pkg/agent_bridge/protocol"
+	"github.com/MortalArena/Musketeers/pkg/node"
 	"github.com/sirupsen/logrus"
 )
 
 // Server خادم جسر الوكلاء
 type Server struct {
-	addr            string
-	listener        net.Listener
-	sessionMgr      *SessionManager
-	multiplexedBrg  *MultiplexedBridge
-	log             *logrus.Logger
-	mu              sync.RWMutex
-	running         bool
-	shutdownCtx     context.Context
-	shutdownCancel  context.CancelFunc
+	node           *node.Node
+	addr           string
+	listener       net.Listener
+	sessionMgr     *SessionManager
+	multiplexedBrg *MultiplexedBridge
+	log            *logrus.Logger
+	mu             sync.RWMutex
+	running        bool
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
 }
 
 // NewServer ينشئ خادم جسر جديد
-func NewServer(addr string, sessionMgr *SessionManager, multiplexedBrg *MultiplexedBridge, log *logrus.Logger) *Server {
+func NewServer(n *node.Node, addr string, sessionMgr *SessionManager, multiplexedBrg *MultiplexedBridge, log *logrus.Logger) *Server {
 	return &Server{
+		node:           n,
 		addr:           addr,
 		sessionMgr:     sessionMgr,
 		multiplexedBrg: multiplexedBrg,
@@ -79,16 +82,13 @@ func (s *Server) acceptConnections() {
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	sessionID := generateSessionID()
-	session := NewSession(sessionID, conn, s.log)
-	
-	if err := s.sessionMgr.Register(session); err != nil {
-		s.log.WithError(err).Error("Failed to register session")
-		return
-	}
-	defer s.sessionMgr.Unregister(sessionID)
+	// ✅ استخدام GetOrCreate لإعادة استخدام الجلسات الموجودة
+	// في التنفيذ الحالي، نستخدم sessionID كـ agentID مؤقتاً
+	// في المستقبل، سيتم استخراج agentID من المصادقة
+	agentID := generateSessionID()
+	session := s.sessionMgr.GetOrCreate(agentID, conn)
 
-	s.log.WithField("session_id", sessionID).Info("New session established")
+	s.log.WithField("session_id", session.ID()).WithField("agent_id", agentID).Info("Session established")
 
 	// بدء معالجة الرسائل
 	for {
@@ -98,12 +98,12 @@ func (s *Server) handleConnection(conn net.Conn) {
 		default:
 			msg, err := protocol.ReadMessage(conn)
 			if err != nil {
-				s.log.WithError(err).WithField("session_id", sessionID).Error("Failed to read message")
+				s.log.WithError(err).WithField("session_id", session.ID()).Error("Failed to read message")
 				return
 			}
 
 			if err := s.handleMessage(session, msg); err != nil {
-				s.log.WithError(err).WithField("session_id", sessionID).Error("Failed to handle message")
+				s.log.WithError(err).WithField("session_id", session.ID()).Error("Failed to handle message")
 				return
 			}
 		}

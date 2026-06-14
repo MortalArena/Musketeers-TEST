@@ -22,7 +22,8 @@ func TestServer_Start(t *testing.T) {
 	addr := listener.Addr().String()
 	listener.Close()
 
-	server := NewServer(addr, sm, mb, log)
+	// ✅ تمرير nil للعقدة في الاختبار
+	server := NewServer(nil, addr, sm, mb, log)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -54,7 +55,8 @@ func TestServer_Start_AlreadyRunning(t *testing.T) {
 	addr := listener.Addr().String()
 	listener.Close()
 
-	server := NewServer(addr, sm, mb, log)
+	// ✅ تمرير nil للعقدة في الاختبار
+	server := NewServer(nil, addr, sm, mb, log)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -86,7 +88,8 @@ func TestServer_Stop(t *testing.T) {
 	addr := listener.Addr().String()
 	listener.Close()
 
-	server := NewServer(addr, sm, mb, log)
+	// ✅ تمرير nil للعقدة في الاختبار
+	server := NewServer(nil, addr, sm, mb, log)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -110,7 +113,8 @@ func TestServer_Stop_NotRunning(t *testing.T) {
 	sm := NewSessionManager(log)
 	mb := NewMultiplexedBridge(log)
 
-	server := NewServer("127.0.0.1:5001", sm, mb, log)
+	// ✅ تمرير nil للعقدة في الاختبار
+	server := NewServer(nil, "127.0.0.1:5001", sm, mb, log)
 
 	err := server.Stop()
 	// Stop لا يرجع خطأ إذا لم يكن الخادم يعمل

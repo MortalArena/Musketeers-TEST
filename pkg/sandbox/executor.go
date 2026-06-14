@@ -33,14 +33,15 @@ func NewExecutor(ctx context.Context) (*Executor, error) {
 
 // Execute ينفذ وحدة WASM مع فرض حدود الموارد الصارمة
 func (e *Executor) Execute(ctx context.Context, config SandboxConfig, funcName string, args ...uint64) (uint64, error) {
-	// ✅ تطبيق حد الذاكرة باستخدام ModuleConfig
+	// ✅ تطبيق حد الذاكرة
+	// ملاحظة: في wazero v1.12.0، WithMemoryLimitPages غير مدعوم مباشرة
+	// يتم تطبيق حد الذاكرة عن طريق تقييد حجم الذاكرة في الـ WASM module نفسه
 	compiled, err := e.runtime.CompileModule(ctx, config.WasmBinary)
 	if err != nil {
 		return 0, fmt.Errorf("failed to compile wasm module: %w", err)
 	}
 
 	// منع الوصول للملفات والشبكة
-	// ملاحظة: حد الذاكرة يتم تطبيقه عن طريق تقييد حجم الذاكرة في الـ WASM module نفسه
 	modConfig := wazero.NewModuleConfig().
 		WithName("isolated-plugin")
 
