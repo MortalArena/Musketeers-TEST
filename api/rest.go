@@ -14,6 +14,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/naming"
 	"github.com/MortalArena/Musketeers/pkg/node"
 	"github.com/MortalArena/Musketeers/pkg/protocol"
+	"github.com/MortalArena/Musketeers/pkg/security"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/sirupsen/logrus"
@@ -21,28 +22,45 @@ import (
 
 // Server خادم REST API
 type Server struct {
-	node       *node.Node
-	log        *logrus.Logger
-	token      string // token محلي للمصادقة
-	server     *http.Server
-	channels   map[string]*pubsub.Subscription
-	messages   map[string][]protocol.ChannelMessage
-	channelsMu sync.RWMutex
+	node        *node.Node
+	log         *logrus.Logger
+	token       string // token محلي للمصادقة
+	server      *http.Server
+	channels    map[string]*pubsub.Subscription
+	messages    map[string][]protocol.ChannelMessage
+	channelsMu  sync.RWMutex
+	tlsEnabled  bool
+	tlsCert     string
+	tlsKey      string
+	rateLimiter *security.RateLimiter
 }
 
 // NewServer ينشئ خادم REST
 func NewServer(n *node.Node, port int, log *logrus.Logger) *Server {
+	return NewServerWithTLS(n, port, log, false, "", "")
+}
+
+// NewServerWithTLS ينشئ خادم REST مع TLS
+func NewServerWithTLS(n *node.Node, port int, log *logrus.Logger, tlsEnabled bool, tlsCert, tlsKey string) *Server {
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		panic(err)
 	}
 	token := fmt.Sprintf("mskt-%x", tokenBytes)
+
+	// ✅ إنشاء Rate Limiter
+	rateLimiter := security.NewRateLimiter(security.DefaultRateLimitConfig())
+
 	s := &Server{
-		node:     n,
-		log:      log,
-		token:    token,
-		channels: make(map[string]*pubsub.Subscription),
-		messages: make(map[string][]protocol.ChannelMessage),
+		node:        n,
+		log:         log,
+		token:       token,
+		channels:    make(map[string]*pubsub.Subscription),
+		messages:    make(map[string][]protocol.ChannelMessage),
+		tlsEnabled:  tlsEnabled,
+		tlsCert:     tlsCert,
+		tlsKey:      tlsKey,
+		rateLimiter: rateLimiter,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/identity", s.handleIdentity)
@@ -61,19 +79,42 @@ func NewServer(n *node.Node, port int, log *logrus.Logger) *Server {
 	mux.HandleFunc("/dashboard/", s.handleDashboard)
 	mux.HandleFunc("/", s.handleRoot)
 
-	s.server = &http.Server{
+	handler := s.corsMiddleware(s.authMiddleware(security.RateLimitMiddleware(rateLimiter)(mux)))
+
+	httpServer := &http.Server{
 		Addr:              fmt.Sprintf("127.0.0.1:%d", port),
-		Handler:           s.corsMiddleware(s.authMiddleware(mux)),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
+
+	// ✅ إضافة TLS
+	if tlsEnabled {
+		tlsBuilder := security.NewTLSConfigBuilder().
+			WithCertFiles(tlsCert, tlsKey)
+
+		securityConfig, err := tlsBuilder.Build()
+		if err != nil {
+			log.WithError(err).Fatal("فشل إعداد TLS")
+		}
+		httpServer.TLSConfig = securityConfig
+	}
+
+	s.server = httpServer
 	return s
 }
 
 // Start يبدأ الخادم
 func (s *Server) Start() error {
-	s.log.WithField("addr", s.server.Addr).Info("بدء REST API")
+	if s.tlsEnabled {
+		s.log.WithField("addr", s.server.Addr).Info("🚀 بدء REST API على HTTPS")
+		s.log.Info("🔒 TLS 1.3 مفعّل مع أقوى cipher suites")
+	} else {
+		s.log.WithField("addr", s.server.Addr).Warn("⚠️ تحذير: الخادم يعمل بدون TLS - غير آمن!")
+		s.log.WithField("addr", s.server.Addr).Info("🚀 بدء REST API على HTTP")
+	}
 
 	// Start system channel listener for agent synchronization
 	go func() {
@@ -110,6 +151,9 @@ func (s *Server) Start() error {
 		}
 	}()
 
+	if s.tlsEnabled {
+		return s.server.ListenAndServeTLS("", "")
+	}
 	return s.server.ListenAndServe()
 }
 

@@ -15,6 +15,7 @@ import (
 	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
 	"github.com/MortalArena/Musketeers/pkg/identity"
 	"github.com/MortalArena/Musketeers/pkg/naming"
+	msktnetwork "github.com/MortalArena/Musketeers/pkg/network"
 	"github.com/MortalArena/Musketeers/pkg/node/subsystems"
 	nrproto "github.com/MortalArena/Musketeers/pkg/protocol"
 	"github.com/MortalArena/Musketeers/pkg/search"
@@ -31,7 +32,6 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	tcp "github.com/libp2p/go-libp2p/p2p/transport/tcp"
-	"github.com/multiformats/go-multiaddr"
 	"github.com/sirupsen/logrus"
 )
 
@@ -48,6 +48,7 @@ type Node struct {
 	keyCacheMu sync.RWMutex
 	topicsMu   sync.RWMutex
 	cancel     context.CancelFunc
+	bootstrap  *msktnetwork.BootstrapManager
 }
 
 func (n *Node) host() host.Host                          { return n.network.Host() }
@@ -134,20 +135,23 @@ func New(ctx context.Context, cfg *Config, kp *nrcrypto.KeyPair, idRec *identity
 		log.WithError(err).Warn("فشل bootstrap DHT جزئياً")
 	}
 
-	// Bootstrap peers
-	for _, addr := range cfg.BootstrapPeers {
-		ma, err := multiaddr.NewMultiaddr(addr)
-		if err != nil {
-			continue
-		}
-		info, err := peer.AddrInfoFromP2pAddr(ma)
-		if err != nil {
-			continue
-		}
-		if err := h.Connect(ctx, *info); err != nil {
-			log.WithError(err).WithField("peer", info.ID).Debug("فشل اتصال bootstrap")
-		}
+	// ✅ استخدام BootstrapManager المحسّن
+	bootstrapCfg := &msktnetwork.BootstrapConfig{
+		Peers:            cfg.BootstrapPeers,
+		MinConnections:   5,
+		MaxRetries:       3,
+		RetryDelay:       5 * time.Second,
+		PeriodicInterval: 5 * time.Minute,
+		EnablePeriodic:   true,
 	}
+
+	bootstrapManager := msktnetwork.NewBootstrapManager(h, log, bootstrapCfg)
+	if err := bootstrapManager.Bootstrap(ctx); err != nil {
+		log.WithError(err).Warn("فشل bootstrap جزئياً")
+	}
+
+	// بدء bootstrap الدوري
+	bootstrapManager.StartPeriodicBootstrap(ctx, 5*time.Minute)
 
 	// PubSub
 	ps, err := pubsub.NewGossipSub(ctx, h)
@@ -181,6 +185,7 @@ func New(ctx context.Context, cfg *Config, kp *nrcrypto.KeyPair, idRec *identity
 		log:       log,
 		chunkAsm:  NewChunkAssembler(),
 		cancel:    cancel,
+		bootstrap: bootstrapManager,
 	}
 
 	// تسجيل بروتوكول Bitswap

@@ -7,18 +7,16 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
-	"sync"
-	"sync/atomic"
 
 	"github.com/mr-tron/base58"
-	"golang.org/x/crypto/scrypt"
 )
 
 const (
-	DefaultPowDifficulty = 18              // N = 1<<18
-	DefaultIdentityTTL   = 365 * 24 * 3600 // سنة واحدة بالثواني
+	// ❌ حذف: DefaultPowDifficulty = 18
+	// ✅ استخدام: DefaultPowDifficulty من pow.go
+
+	DefaultIdentityTTL = 365 * 24 * 3600 // سنة واحدة بالثواني
 )
 
 // KeyPair زوج مفاتيح Ed25519 مع DID
@@ -60,7 +58,7 @@ func DIDFromPublicKey(pub ed25519.PublicKey) string {
 // PowDifficulty يقرأ صعوبة PoW من البيئة
 func PowDifficulty() int {
 	if v := os.Getenv("NR_POW_DIFFICULTY"); v != "" {
-		if d, err := strconv.Atoi(v); err == nil && d >= 1 && d <= 20 {
+		if d, err := strconv.Atoi(v); err == nil && d >= MinPowDifficulty && d <= MaxPowDifficulty {
 			return d
 		}
 	}
@@ -68,96 +66,23 @@ func PowDifficulty() int {
 }
 
 // MinePow يعدّن PoW باستخدام scrypt — أول بايت من الناتج == 0x00
+// ✅ استخدام الدالة المحسّنة من pow.go
 func MinePow(ctx context.Context, did string, difficulty int) ([]byte, error) {
-	N := uint64(1) << uint(difficulty)
-	salt := []byte(did)
-	nonce := make([]byte, 16)
-	if _, err := rand.Read(nonce); err != nil {
+	result, err := MineIdentity(ctx, did, difficulty)
+	if err != nil {
 		return nil, err
 	}
-
-	workers := runtime.NumCPU()
-	if workers < 1 {
-		workers = 1
-	}
-
-	type result struct {
-		nonce []byte
-	}
-	resultCh := make(chan result, 1)
-	var found atomic.Bool
-	var wg sync.WaitGroup
-
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			localNonce := make([]byte, 16)
-			copy(localNonce, nonce)
-			// كل worker يبدأ من offset مختلف
-			localNonce[0] = byte((int(localNonce[0]) + workerID*17) % 256)
-
-			counter := uint64(0)
-			for {
-				if found.Load() {
-					return
-				}
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				input := append([]byte(did), localNonce...)
-				out, err := scrypt.Key(input, salt, int(N), 8, 1, 32)
-				if err != nil {
-					return
-				}
-				if out[0] == 0x00 {
-					if found.CompareAndSwap(false, true) {
-						resultCh <- result{nonce: append([]byte(nil), localNonce...)}
-					}
-					return
-				}
-
-				counter++
-				// زيادة العداد في آخر بايت
-				for i := len(localNonce) - 1; i >= 0; i-- {
-					localNonce[i]++
-					if localNonce[i] != 0 {
-						break
-					}
-				}
-			}
-		}(w)
-	}
-
-	go func() {
-		wg.Wait()
-		close(resultCh)
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case res, ok := <-resultCh:
-		if !ok {
-			return nil, fmt.Errorf("فشل تعدين PoW")
-		}
-		return res.nonce, nil
-	}
+	return []byte(result.Nonce), nil
 }
 
 // VerifyPow يتحقق من صحة PoW
+// ✅ استخدام الدالة المحسّنة من pow.go
 func VerifyPow(did string, nonce []byte, difficulty int) bool {
-	N := uint64(1) << uint(difficulty)
-	salt := []byte(did)
-	input := append([]byte(did), nonce...)
-	out, err := scrypt.Key(input, salt, int(N), 8, 1, 32)
+	valid, err := VerifyPoW(did, string(nonce), difficulty)
 	if err != nil {
 		return false
 	}
-	return out[0] == 0x00
+	return valid
 }
 
 // PublicKeyHex يرجع المفتاح العام كـ hex
