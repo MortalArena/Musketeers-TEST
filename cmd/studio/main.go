@@ -199,6 +199,34 @@ func main() {
 	// إنشاء الجسر المتعدد
 	multiplexedBrg := agent_bridge.NewMultiplexedBridge(log)
 
+	// إنشاء Connector لربط Bridge و Event Bus و Adapters
+	connector := pkgOrchestrator.NewConnector(eb, multiplexedBrg, agentRegistry, zapLogger)
+	if err := connector.Start(); err != nil {
+		log.WithError(err).Fatal("Failed to start connector")
+	}
+	defer connector.Stop()
+	log.Info("Connector started")
+
+	// إنشاء ChatConnector لربط الشات والقنوات
+	// ملاحظة: ChatConnector يتطلب مفتاح ed25519.PrivateKey
+	// حالياً نستخدم kp بدلاً من ذلك
+	chatConnector := pkgOrchestrator.NewChatConnector(eb, agentRegistry, sessionContainer, nil, zapLogger)
+	if err := chatConnector.Start(); err != nil {
+		log.WithError(err).Fatal("Failed to start chat connector")
+	}
+	defer chatConnector.Stop()
+	log.Info("Chat connector started")
+
+	// إنشاء ExternalPlatformManager لإدارة المنصات الخارجية
+	// ملاحظة: ExternalPlatformManager يتطلب capability.Manager
+	// حالياً نستخدم nil بدلاً من ذلك
+	platformManager := pkgOrchestrator.NewExternalPlatformManager(eb, nil, zapLogger)
+	if err := platformManager.Start(); err != nil {
+		log.WithError(err).Fatal("Failed to start external platform manager")
+	}
+	defer platformManager.Stop()
+	log.Info("External platform manager started")
+
 	// إنشاء خادم الجسر
 	bridgeServer := agent_bridge.NewServer(n, *agentAddr, sessionMgr, multiplexedBrg, log)
 	if err := bridgeServer.Start(ctx); err != nil {
