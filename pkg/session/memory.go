@@ -1,0 +1,281 @@
+package session
+
+import (
+	"encoding/json"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/dgraph-io/badger/v4"
+)
+
+// CollectiveMemory الذاكرة الجماعية - العقل الجمعي للجلسة
+type CollectiveMemory struct {
+	SessionID string `json:"session_id"`
+
+	// 4 أنواع من الذاكرة
+	Episodic   []MemoryEvent    `json:"episodic"`    // أحداث (ماذا حدث؟)
+	Semantic   []MemoryFact     `json:"semantic"`    // حقائق (ماذا نعرف؟)
+	Procedural []MemoryWorkflow `json:"procedural"`  // طرق (كيف نفعل؟)
+	Meta       []MemoryStrategy `json:"meta"`        // استراتيجيات (كيف نفكر؟)
+
+	// إحصائيات
+	TotalEvents     int `json:"total_events"`
+	TotalFacts      int `json:"total_facts"`
+	TotalWorkflows  int `json:"total_workflows"`
+	TotalStrategies int `json:"total_strategies"`
+
+	DB *badger.DB
+	mu sync.RWMutex
+}
+
+// MemoryEvent حدث في الذاكرة العرضية
+type MemoryEvent struct {
+	ID         string                 `json:"id"`
+	Timestamp  time.Time              `json:"timestamp"`
+	AgentDID   string                 `json:"agent_did"`
+	Action     string                 `json:"action"`
+	Context    map[string]interface{} `json:"context"`
+	Outcome    string                 `json:"outcome"` // success, failure, partial
+	Lessons    []string               `json:"lessons"`
+	Confidence float64                `json:"confidence"` // 0.0 - 1.0
+	Tags       []string               `json:"tags"`
+}
+
+// MemoryFact حقيقة في الذاكرة الدلالية
+type MemoryFact struct {
+	ID         string    `json:"id"`
+	Statement  string    `json:"statement"`
+	Category   string    `json:"category"` // technical, business, user, etc.
+	Confidence float64   `json:"confidence"`
+	Source     string    `json:"source"`
+	VerifiedBy []string  `json:"verified_by"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	Tags       []string  `json:"tags"`
+}
+
+// MemoryWorkflow workflow في الذاكرة الإجرائية
+type MemoryWorkflow struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Steps       []WorkflowStep `json:"steps"`
+	SuccessRate float64        `json:"success_rate"` // 0.0 - 1.0
+	AvgDuration time.Duration  `json:"avg_duration"`
+	UsedCount   int            `json:"used_count"`
+	CreatedAt   time.Time      `json:"created_at"`
+	Tags        []string       `json:"tags"`
+}
+
+// WorkflowStep خطوة في workflow
+type WorkflowStep struct {
+	Order          int           `json:"order"`
+	Action         string        `json:"action"`
+	AgentType      string        `json:"agent_type"`
+	ExpectedOutput string        `json:"expected_output"`
+	Timeout        time.Duration `json:"timeout"`
+}
+
+// MemoryStrategy استراتيجية في الذاكرة الوصفية
+type MemoryStrategy struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	WhenToUse     string    `json:"when_to_use"`
+	HowToUse      string    `json:"how_to_use"`
+	Effectiveness float64   `json:"effectiveness"` // 0.0 - 1.0
+	Examples      []string  `json:"examples"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// NewCollectiveMemory ينشئ ذاكرة جماعية جديدة
+func NewCollectiveMemory(sessionID string, db *badger.DB) *CollectiveMemory {
+	return &CollectiveMemory{
+		SessionID:  sessionID,
+		Episodic:   make([]MemoryEvent, 0),
+		Semantic:   make([]MemoryFact, 0),
+		Procedural: make([]MemoryWorkflow, 0),
+		Meta:       make([]MemoryStrategy, 0),
+		DB:         db,
+	}
+}
+
+// RecordEvent يسجل حدثاً في الذاكرة العرضية
+func (cm *CollectiveMemory) RecordEvent(event MemoryEvent) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	event.ID = fmt.Sprintf("evt_%d", len(cm.Episodic)+1)
+	event.Timestamp = time.Now()
+
+	cm.Episodic = append(cm.Episodic, event)
+	cm.TotalEvents++
+
+	data, _ := json.Marshal(event)
+	return cm.DB.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(event.ID), data)
+	})
+}
+
+// LearnFact يتعلم حقيقة جديدة في الذاكرة الدلالية
+func (cm *CollectiveMemory) LearnFact(fact MemoryFact) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// التحقق من عدم التكرار
+	for i, existing := range cm.Semantic {
+		if existing.Statement == fact.Statement {
+			// تحديث الثقة إذا كانت أعلى
+			if fact.Confidence > existing.Confidence {
+				cm.Semantic[i].Confidence = fact.Confidence
+				cm.Semantic[i].UpdatedAt = time.Now()
+			}
+			return nil
+		}
+	}
+
+	fact.ID = fmt.Sprintf("fact_%d", len(cm.Semantic)+1)
+	fact.CreatedAt = time.Now()
+	fact.UpdatedAt = time.Now()
+
+	cm.Semantic = append(cm.Semantic, fact)
+	cm.TotalFacts++
+
+	data, _ := json.Marshal(fact)
+	return cm.DB.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(fact.ID), data)
+	})
+}
+
+// DiscoverWorkflow يكتشف workflow جديد في الذاكرة الإجرائية
+func (cm *CollectiveMemory) DiscoverWorkflow(workflow MemoryWorkflow) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	workflow.ID = fmt.Sprintf("wf_%d", len(cm.Procedural)+1)
+	workflow.CreatedAt = time.Now()
+
+	cm.Procedural = append(cm.Procedural, workflow)
+	cm.TotalWorkflows++
+
+	data, _ := json.Marshal(workflow)
+	return cm.DB.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(workflow.ID), data)
+	})
+}
+
+// DevelopStrategy يطور استراتيجية جديدة في الذاكرة الوصفية
+func (cm *CollectiveMemory) DevelopStrategy(strategy MemoryStrategy) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	strategy.ID = fmt.Sprintf("strat_%d", len(cm.Meta)+1)
+	strategy.CreatedAt = time.Now()
+
+	cm.Meta = append(cm.Meta, strategy)
+	cm.TotalStrategies++
+
+	data, _ := json.Marshal(strategy)
+	return cm.DB.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(strategy.ID), data)
+	})
+}
+
+// GetBestWorkflow يعيد أفضل workflow لمهمة معينة
+func (cm *CollectiveMemory) GetBestWorkflow(taskType string) *MemoryWorkflow {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	var best *MemoryWorkflow
+	var bestScore float64
+
+	for i := range cm.Procedural {
+		wf := &cm.Procedural[i]
+		// حساب الدرجة: success_rate * (1 / avg_duration)
+		score := wf.SuccessRate * (1.0 / float64(wf.AvgDuration.Seconds()+1))
+
+		if score > bestScore {
+			bestScore = score
+			best = wf
+		}
+	}
+
+	return best
+}
+
+// QueryEvents يبحث في الأحداث
+func (cm *CollectiveMemory) QueryEvents(filters map[string]interface{}) []MemoryEvent {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	var results []MemoryEvent
+	for _, event := range cm.Episodic {
+		if matchesFilters(event, filters) {
+			results = append(results, event)
+		}
+	}
+	return results
+}
+
+// matchesFilters يتحقق من تطابق الحدث مع الفلاتر
+func matchesFilters(event MemoryEvent, filters map[string]interface{}) bool {
+	for key, value := range filters {
+		switch key {
+		case "agent_did":
+			if event.AgentDID != value.(string) {
+				return false
+			}
+		case "outcome":
+			if event.Outcome != value.(string) {
+				return false
+			}
+		case "tags":
+			tags := value.([]string)
+			found := false
+			for _, tag := range tags {
+				for _, eventTag := range event.Tags {
+					if tag == eventTag {
+						found = true
+						break
+					}
+				}
+				if found {
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// Clone ينسخ الذاكرة (للتصدير/الاستيراد)
+func (cm *CollectiveMemory) Clone() *CollectiveMemory {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	clone := &CollectiveMemory{
+		SessionID:       cm.SessionID,
+		TotalEvents:     cm.TotalEvents,
+		TotalFacts:      cm.TotalFacts,
+		TotalWorkflows:  cm.TotalWorkflows,
+		TotalStrategies: cm.TotalStrategies,
+		DB:              cm.DB,
+	}
+
+	clone.Episodic = make([]MemoryEvent, len(cm.Episodic))
+	copy(clone.Episodic, cm.Episodic)
+
+	clone.Semantic = make([]MemoryFact, len(cm.Semantic))
+	copy(clone.Semantic, cm.Semantic)
+
+	clone.Procedural = make([]MemoryWorkflow, len(cm.Procedural))
+	copy(clone.Procedural, cm.Procedural)
+
+	clone.Meta = make([]MemoryStrategy, len(cm.Meta))
+	copy(clone.Meta, cm.Meta)
+
+	return clone
+}
