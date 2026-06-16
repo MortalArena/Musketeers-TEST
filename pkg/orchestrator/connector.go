@@ -721,3 +721,85 @@ func (a *AgentAdapter) Convert(data interface{}) (interface{}, error) {
 func generateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
+
+// ============================================================
+// Task Assignment - تعيين المهام للوكلاء
+// ============================================================
+
+// [WHY] handleTaskAssigned يعالج حدث تعيين مهمة
+// [HOW] يختار الوكيل المناسب ويرسل المهمة له عبر Bridge
+// [SAFETY] يستخدم context مع timeout لمنع الحظر
+func (c *Connector) handleTaskAssigned(event eventbus.Event) {
+	// [HOW] استخراج بيانات المهمة من الحدث
+	taskData, ok := event.Payload.(map[string]interface{})
+	if !ok {
+		c.logger.Error("بيانات المهمة غير صالحة")
+		c.recordError()
+		return
+	}
+
+	// [HOW] استخراج معرف الوكيل المطلوب
+	agentDID, ok := taskData["agent_did"].(string)
+	if !ok || agentDID == "" {
+		c.logger.Error("معرف الوكيل غير موجود")
+		c.recordError()
+		return
+	}
+
+	// [HOW] استخراج بيانات المهمة
+	taskID, _ := taskData["task_id"].(string)
+	taskTitle, _ := taskData["title"].(string)
+	taskDescription, _ := taskData["description"].(string)
+
+	// [HOW] إرسال المهمة للوكيل عبر Bridge
+	err := c.dispatchTaskToBridge(agentDID, map[string]interface{}{
+		"task_id":     taskID,
+		"title":       taskTitle,
+		"description": taskDescription,
+		"session_id":  event.SessionID,
+	})
+
+	if err != nil {
+		c.logger.Error("فشل إرسال المهمة للوكيل",
+			zap.String("agent_did", agentDID),
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+		c.recordError()
+		return
+	}
+
+	c.logger.Info("تم إرسال المهمة للوكيل",
+		zap.String("agent_did", agentDID),
+		zap.String("task_id", taskID),
+	)
+}
+
+// [WHY] dispatchTaskToBridge يرسل مهمة للوكيل عبر Bridge
+// [HOW] يحول بيانات المهمة إلى protocol.Message ويرسلها عبر LaneWorkflow
+// [SAFETY] يستخدم context مع timeout لمنع الحظر
+func (c *Connector) dispatchTaskToBridge(agentDID string, taskData map[string]interface{}) error {
+	// [HOW] تحويل بيانات المهمة إلى protocol.Message
+	taskBytes, err := json.Marshal(taskData)
+	if err != nil {
+		return fmt.Errorf("فشل تحويل بيانات المهمة: %w", err)
+	}
+
+	msg := &protocol.Message{
+		Type: protocol.MessageTypeTaskRequest,
+		Data: taskBytes,
+	}
+
+	// [HOW] إرسال الرسالة عبر Bridge في مسار Workflow
+	err = c.bridge.Send(agent_bridge.LaneWorkflow, msg)
+	if err != nil {
+		return fmt.Errorf("فشل إرسال الرسالة عبر Bridge: %w", err)
+	}
+
+	// [HOW] تحديث المقاييس
+	c.mu.Lock()
+	c.metrics.MessagesSent++
+	c.mu.Unlock()
+
+	return nil
+}

@@ -1,6 +1,8 @@
 package mailbox
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -31,22 +33,35 @@ func NewMailbox(store content.BlockStore) *Mailbox {
 }
 
 // Send يشفر الرسالة ويخزنها للمستقبل
-func (m *Mailbox) Send(senderDID, recipientDID string, plaintext []byte, recipientPubKey []byte) error {
-	// 1. توليد Nonce عشوائي للتشفير
-	nonce := make([]byte, 24) // حجم مناسب لـ XSalsa20-Poly1305 أو مشابه
+func (m *Mailbox) Send(senderDID, recipientDID string, plaintext []byte, recipientPubKey []byte, senderPrivKey *[32]byte) error {
+	// 1. توليد مفتاح AES-256 عشوائي
+	aesKey := make([]byte, 32)
+	if _, err := rand.Read(aesKey); err != nil {
+		return fmt.Errorf("failed to generate AES key: %w", err)
+	}
+
+	// 2. إنشاء cipher block
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return fmt.Errorf("failed to create cipher block: %w", err)
+	}
+
+	// 3. إنشاء GCM
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// 4. توليد nonce
+	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
-	// 2. تشفير الرسالة باستخدام المفتاح العام للمستقبل
-	// ملاحظة: في التنفيذ الحالي، سنستخدم تشفير بسيط XOR للتوضيح
-	// في الإنتاج، يجب استخدام خوارزمية تشفير حقيقية مثل NaCl Box
-	encryptedPayload, err := simpleEncrypt(plaintext, nonce, recipientPubKey)
-	if err != nil {
-		return fmt.Errorf("failed to encrypt message: %w", err)
-	}
+	// 5. تشفير الرسالة
+	encryptedPayload := gcm.Seal(nonce, nonce, plaintext, nil)
 
-	// 3. إنشاء كائن الرسالة
+	// 6. إنشاء كائن الرسالة
 	msg := &Message{
 		ID:               generateID(),
 		SenderDID:        senderDID,
@@ -56,7 +71,7 @@ func (m *Mailbox) Send(senderDID, recipientDID string, plaintext []byte, recipie
 		Timestamp:        time.Now(),
 	}
 
-	// 4. تخزين الرسالة في مسار خاص بالمستقبل
+	// 7. تخزين الرسالة في مسار خاص بالمستقبل
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %w", err)
@@ -79,28 +94,36 @@ func (m *Mailbox) Fetch(recipientDID string, recipientPrivKey []byte) ([]*Messag
 	return []*Message{}, nil
 }
 
-// simpleEncrypt تشفير بسيط للتوضيح (يجب استبداله بتشفير حقيقي في الإنتاج)
-func simpleEncrypt(plaintext, nonce, key []byte) ([]byte, error) {
-	if len(key) == 0 {
-		return nil, fmt.Errorf("encryption key cannot be empty")
+// DecryptMessage يفك تشفير رسالة باستخدام AES-GCM
+func (m *Mailbox) DecryptMessage(msg *Message, aesKey []byte) ([]byte, error) {
+	// 1. إنشاء cipher block
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher block: %w", err)
 	}
-	result := make([]byte, len(plaintext))
-	for i := range plaintext {
-		result[i] = plaintext[i] ^ nonce[i%len(nonce)] ^ key[i%len(key)]
-	}
-	return result, nil
-}
 
-// simpleDecrypt فك تشفير بسيط للتوضيح (يجب استبداله بفك تشفير حقيقي في الإنتاج)
-func simpleDecrypt(ciphertext, nonce, key []byte) ([]byte, error) {
-	if len(key) == 0 {
-		return nil, fmt.Errorf("decryption key cannot be empty")
+	// 2. إنشاء GCM
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
 	}
-	result := make([]byte, len(ciphertext))
-	for i := range ciphertext {
-		result[i] = ciphertext[i] ^ nonce[i%len(nonce)] ^ key[i%len(key)]
+
+	// 3. فصل nonce من ciphertext
+	nonceSize := gcm.NonceSize()
+	if len(msg.EncryptedPayload) < nonceSize {
+		return nil, fmt.Errorf("ciphertext too short")
 	}
-	return result, nil
+
+	nonce := msg.EncryptedPayload[:nonceSize]
+	ciphertext := msg.EncryptedPayload[nonceSize:]
+
+	// 4. فك التشفير
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	return plaintext, nil
 }
 
 func generateID() string {

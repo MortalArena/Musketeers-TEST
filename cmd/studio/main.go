@@ -3,14 +3,19 @@ package main
 import (
 	"context"
 	"flag"
+	stdlog "log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/MortalArena/Musketeers/pkg/acp"
 	pkgAgent "github.com/MortalArena/Musketeers/pkg/agent"
 	pkgAdapters "github.com/MortalArena/Musketeers/pkg/agent/adapters"
+	agentTools "github.com/MortalArena/Musketeers/pkg/agent/tools"
 	"github.com/MortalArena/Musketeers/pkg/agent_bridge"
+	pkgCapability "github.com/MortalArena/Musketeers/pkg/capability"
+	pkgCEO "github.com/MortalArena/Musketeers/pkg/ceo"
 	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
 	pkgEventbus "github.com/MortalArena/Musketeers/pkg/eventbus"
 	"github.com/MortalArena/Musketeers/pkg/identity"
@@ -171,10 +176,31 @@ func main() {
 	}
 	log.WithField("session_id", sessionContainer.ID).Info("Session Container created")
 
+	// [WHY] تهيئة ToolExecutor لتنفيذ الأدوات مع حدود أمان
+	// [HOW] يفرض حدود على استدعاءات الأدوات وحجم الملفات والمسارات
+	// [SAFETY] يمنع الحلقات اللانهائية والوصول غير المصرح به
+	toolExecutor := agentTools.NewToolExecutor(*dataDir, zapLogger)
+	log.Info("Tool Executor created")
+
+	// [WHY] تهيئة CEOSupervisor لمراقبة صحة الشبكة
+	// [HOW] يسجل نفسه كوكيل admin ويشغل HealthCheck دوري
+	// [SAFETY] يراقب النظام وينشر تنبيهات عند المشاكل
+	ceoLogger := stdlog.New(os.Stdout, "[CEO] ", stdlog.LstdFlags)
+	ceoSupervisor := pkgCEO.NewCEOSupervisor(eb, agentRegistry, ceoLogger)
+	if err := ceoSupervisor.Start(); err != nil {
+		log.WithError(err).Fatal("Failed to start CEO supervisor")
+	}
+	defer ceoSupervisor.Stop()
+	log.Info("CEO Supervisor started")
+
 	// إنشاء Orchestrator components
 	sessionManager := pkgOrchestrator.NewSessionManager(zapLogger)
 	sessionManager.SetAgentRegistry(agentRegistry)
 	sessionManager.SetEventBus(eb)
+	// [WHY] ربط ToolExecutor مع SessionManager
+	// [HOW] يمرر ToolExecutor لاستخدامه في تنفيذ المهام
+	// [SAFETY] يضمن أن الوكلاء يستخدمون حدود الأمان
+	sessionManager.SetToolExecutor(toolExecutor)
 
 	delegationManager := pkgOrchestrator.NewDelegationManager(sessionContainer.ID, zapLogger)
 	delegationManager.SetAgentRegistry(agentRegistry)
@@ -193,6 +219,10 @@ func main() {
 	verifier.RegisterVerifier(pkgVerification.NewDefaultIntegrationVerifier())
 	log.Info("Verification components created")
 
+	// إنشاء ACP Handler (يسجل تلقائياً المهام المدمجة)
+	_ = acp.NewRouter()
+	log.Info("ACP handlers registered")
+
 	// إنشاء مدير الجلسات
 	sessionMgr := agent_bridge.NewSessionManager(log)
 
@@ -209,8 +239,8 @@ func main() {
 
 	// إنشاء ChatConnector لربط الشات والقنوات
 	// ملاحظة: ChatConnector يتطلب مفتاح ed25519.PrivateKey
-	// حالياً نستخدم kp بدلاً من ذلك
-	chatConnector := pkgOrchestrator.NewChatConnector(eb, agentRegistry, sessionContainer, nil, zapLogger)
+	// نستخدم kp.Private للمصادقة والتشفير
+	chatConnector := pkgOrchestrator.NewChatConnector(eb, agentRegistry, sessionContainer, kp.Private, zapLogger)
 	if err := chatConnector.Start(); err != nil {
 		log.WithError(err).Fatal("Failed to start chat connector")
 	}
@@ -219,8 +249,9 @@ func main() {
 
 	// إنشاء ExternalPlatformManager لإدارة المنصات الخارجية
 	// ملاحظة: ExternalPlatformManager يتطلب capability.Manager
-	// حالياً نستخدم nil بدلاً من ذلك
-	platformManager := pkgOrchestrator.NewExternalPlatformManager(eb, nil, zapLogger)
+	// ننشئ Capability Manager مع policy.Engine فارغ
+	capabilityManager := pkgCapability.NewManager(nil)
+	platformManager := pkgOrchestrator.NewExternalPlatformManager(eb, capabilityManager, zapLogger)
 	if err := platformManager.Start(); err != nil {
 		log.WithError(err).Fatal("Failed to start external platform manager")
 	}

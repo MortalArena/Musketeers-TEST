@@ -16,6 +16,7 @@ type SessionManager struct {
 	Sessions      map[string]*SessionInfo
 	AgentRegistry *agent.AgentRegistry
 	EventBus      *eventbus.EventBus
+	ToolExecutor  interface{} // [WHY] منفذ الأدوات لتنفيذ المهام
 	Logger        *zap.Logger
 	mu            sync.RWMutex
 }
@@ -52,6 +53,13 @@ func (sm *SessionManager) SetEventBus(eb *eventbus.EventBus) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.EventBus = eb
+}
+
+// SetToolExecutor يضبط منفذ الأدوات
+func (sm *SessionManager) SetToolExecutor(te interface{}) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.ToolExecutor = te
 }
 
 // CreateSession ينشئ جلسة جديدة

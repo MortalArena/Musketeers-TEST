@@ -13,6 +13,9 @@ import (
 )
 
 // SessionContainer الحاوية الكاملة للجلسة - القلب النابض
+// [WHY] يدير جميع مكونات الجلسة ويوفر حالة موحدة
+// [HOW] يستخدم stateMu لحماية الحالة الموحدة ويفك القفل قبل النشر
+// [SAFETY] يفك القفل دائماً قبل استدعاء eventBus.Publish لمنع Deadlock
 type SessionContainer struct {
 	// Metadata
 	ID          string    `json:"id"`
@@ -37,6 +40,15 @@ type SessionContainer struct {
 	Aggregator *Aggregator
 	Reviewer   *FinalReviewer
 
+	// [WHY] ChatManager الجديد لإدارة الرسائل
+	ChatManager *ChatManager
+
+	// [WHY] UnifiedSessionState الحالة الموحدة للجلسة
+	// [HOW] يحتوي على ملخص الحالة للعميل
+	// [SAFETY] محمي بـ stateMu
+	state   UnifiedSessionState
+	stateMu sync.RWMutex
+
 	// Event Bus
 	EventBus *eventbus.EventBus
 
@@ -46,6 +58,41 @@ type SessionContainer struct {
 	mu         sync.RWMutex
 	ctx        context.Context
 	cancelFunc context.CancelFunc
+}
+
+// [WHY] UnifiedSessionState الحالة الموحدة للجلسة
+// [HOW] يحتوي على ملخص الحالة للعميل
+type UnifiedSessionState struct {
+	SessionID string       `json:"session_id"` // [WHY] معرف الجلسة
+	Status    string       `json:"status"`     // [WHY] حالة الجلسة
+	Agents    []AgentInfo  `json:"agents"`     // [WHY] قائمة الوكلاء
+	Tasks     []TaskInfo   `json:"tasks"`      // [WHY] قائمة المهام
+	Progress  ProgressInfo `json:"progress"`   // [WHY] تقدم الجلسة
+	UpdatedAt time.Time    `json:"updated_at"` // [WHY] وقت التحديث
+}
+
+// [WHY] AgentInfo معلومات الوكيل
+type AgentInfo struct {
+	DID    string `json:"did"`    // [WHY] معرف الوكيل
+	Name   string `json:"name"`   // [WHY] اسم الوكيل
+	Status string `json:"status"` // [WHY] حالة الوكيل
+	Role   string `json:"role"`   // [WHY] دور الوكيل
+}
+
+// [WHY] TaskInfo معلومات المهمة
+type TaskInfo struct {
+	ID         string `json:"id"`          // [WHY] معرف المهمة
+	Title      string `json:"title"`       // [WHY] عنوان المهمة
+	Status     string `json:"status"`      // [WHY] حالة المهمة
+	AssignedTo string `json:"assigned_to"` // [WHY] الوكيل المسؤول
+	Priority   string `json:"priority"`    // [WHY] أولوية المهمة
+}
+
+// [WHY] ProgressInfo معلومات التقدم
+type ProgressInfo struct {
+	TotalTasks     int     `json:"total_tasks"`     // [WHY] إجمالي المهام
+	CompletedTasks int     `json:"completed_tasks"` // [WHY] المهام المكتملة
+	Percentage     float64 `json:"percentage"`      // [WHY] نسبة الإنجاز
 }
 
 // SessionConfig إعدادات الجلسة
@@ -58,7 +105,14 @@ type SessionConfig struct {
 }
 
 // NewSessionContainer ينشئ حاوية جلسة جديدة
+// [WHY] يهيئ جميع المكونات بما فيها ChatManager والحالة الموحدة
+// [HOW] ينشئ ChatManager ويهيئ UnifiedSessionState
+// [SAFETY] يتحقق من أن eventBus ليس nil
 func NewSessionContainer(ctx context.Context, db *badger.DB, config *SessionConfig, eb *eventbus.EventBus) (*SessionContainer, error) {
+	if eb == nil {
+		return nil, fmt.Errorf("eventBus cannot be nil") // [SAFETY] منع nil pointer
+	}
+
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	session := &SessionContainer{
@@ -88,6 +142,23 @@ func NewSessionContainer(ctx context.Context, db *badger.DB, config *SessionConf
 	session.Handoff = NewHandoffManager(session.ID, "")
 	session.Aggregator = NewAggregator(session.ID)
 	session.Reviewer = NewFinalReviewer()
+
+	// [WHY] تهيئة ChatManager الجديد
+	session.ChatManager = NewChatManager(session.ID, eb)
+
+	// [WHY] تهيئة الحالة الموحدة
+	session.state = UnifiedSessionState{
+		SessionID: session.ID,
+		Status:    "active",
+		Agents:    make([]AgentInfo, 0),
+		Tasks:     make([]TaskInfo, 0),
+		Progress: ProgressInfo{
+			TotalTasks:     0,
+			CompletedTasks: 0,
+			Percentage:     0.0,
+		},
+		UpdatedAt: time.Now(),
+	}
 
 	// نشر حدث الإنشاء
 	eb.Publish(eventbus.Event{
@@ -154,6 +225,14 @@ func (s *SessionContainer) Resume() error {
 	s.Status = "active"
 	s.UpdatedAt = time.Now()
 
+	// [SAFETY] تحديث الحالة الموحدة
+	s.stateMu.Lock()
+	s.state.Status = "active"
+	s.state.UpdatedAt = time.Now()
+	stateCopy := s.state
+	s.stateMu.Unlock()
+
+	// [HOW] نشر حدث session.resumed بعد فك القفل
 	s.EventBus.Publish(eventbus.Event{
 		Type:      "session.resumed",
 		Payload:   s.ID,
@@ -161,5 +240,153 @@ func (s *SessionContainer) Resume() error {
 		SessionID: s.ID,
 	})
 
+	// [HOW] نشر حدث session.state.changed بعد فك القفل
+	s.EventBus.Publish(eventbus.Event{
+		Type:      "session.state.changed",
+		Payload:   stateCopy,
+		Source:    "session_container",
+		SessionID: s.ID,
+	})
+
 	return nil
+}
+
+// [WHY] UpdateTaskStatus يحدث حالة مهمة
+// [HOW] يحدث الحالة الموحدة وينشر حدث session.state.changed
+// [SAFETY] يفك القفل قبل استدعاء eventBus.Publish لمنع Deadlock
+func (s *SessionContainer) UpdateTaskStatus(taskID, status string) error {
+	// [SAFETY] قفل للكتابة على الحالة الموحدة
+	s.stateMu.Lock()
+
+	// [HOW] تحديث المهمة في الحالة الموحدة
+	for i := range s.state.Tasks {
+		if s.state.Tasks[i].ID == taskID {
+			s.state.Tasks[i].Status = status
+			break
+		}
+	}
+
+	// [HOW] تحديث التقدم
+	s.updateProgress()
+
+	// [HOW] نسخ الحالة للنشر
+	stateCopy := s.state
+
+	// [SAFETY] فك القفل فوراً قبل النشر لمنع Deadlock
+	s.stateMu.Unlock()
+
+	// [HOW] نشر حدث session.state.changed بعد فك القفل
+	s.EventBus.Publish(eventbus.Event{
+		Type:      "session.state.changed",
+		Payload:   stateCopy,
+		Source:    "session_container",
+		SessionID: s.ID,
+	})
+
+	return nil
+}
+
+// [WHY] AddTask يضيف مهمة جديدة
+// [HOW] يضيف المهمة للحالة الموحدة وينشر حدث session.state.changed
+// [SAFETY] يفك القفل قبل استدعاء eventBus.Publish لمنع Deadlock
+func (s *SessionContainer) AddTask(taskID, title, assignedTo, priority string) error {
+	// [SAFETY] قفل للكتابة على الحالة الموحدة
+	s.stateMu.Lock()
+
+	// [HOW] إضافة المهمة للحالة الموحدة
+	s.state.Tasks = append(s.state.Tasks, TaskInfo{
+		ID:         taskID,
+		Title:      title,
+		Status:     "pending",
+		AssignedTo: assignedTo,
+		Priority:   priority,
+	})
+
+	// [HOW] تحديث التقدم
+	s.updateProgress()
+
+	// [HOW] نسخ الحالة للنشر
+	stateCopy := s.state
+
+	// [SAFETY] فك القفل فوراً قبل النشر لمنع Deadlock
+	s.stateMu.Unlock()
+
+	// [HOW] نشر حدث session.state.changed بعد فك القفل
+	s.EventBus.Publish(eventbus.Event{
+		Type:      "session.state.changed",
+		Payload:   stateCopy,
+		Source:    "session_container",
+		SessionID: s.ID,
+	})
+
+	return nil
+}
+
+// [WHY] AddAgent يضيف وكيل جديد
+// [HOW] يضيف الوكيل للحالة الموحدة وينشر حدث session.state.changed
+// [SAFETY] يفك القفل قبل استدعاء eventBus.Publish لمنع Deadlock
+func (s *SessionContainer) AddAgent(did, name, role string) error {
+	// [SAFETY] قفل للكتابة على الحالة الموحدة
+	s.stateMu.Lock()
+
+	// [HOW] إضافة الوكيل للحالة الموحدة
+	s.state.Agents = append(s.state.Agents, AgentInfo{
+		DID:    did,
+		Name:   name,
+		Status: "active",
+		Role:   role,
+	})
+
+	// [HOW] نسخ الحالة للنشر
+	stateCopy := s.state
+
+	// [SAFETY] فك القفل فوراً قبل النشر لمنع Deadlock
+	s.stateMu.Unlock()
+
+	// [HOW] نشر حدث session.state.changed بعد فك القفل
+	s.EventBus.Publish(eventbus.Event{
+		Type:      "session.state.changed",
+		Payload:   stateCopy,
+		Source:    "session_container",
+		SessionID: s.ID,
+	})
+
+	return nil
+}
+
+// [WHY] GetUnifiedState يحصل على الحالة الموحدة
+// [HOW] ينسخ الحالة ويعيدها
+// [SAFETY] يستخدم RLock للقراءة فقط
+func (s *SessionContainer) GetUnifiedState() UnifiedSessionState {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+
+	// [WHY] نسخ الحالة لمنع تعديلها من الخارج
+	stateCopy := s.state
+	return stateCopy
+}
+
+// [WHY] updateProgress يحدث التقدم
+// [HOW] يحسب نسبة الإنجاز بناءً على المهام المكتملة
+// [SAFETY] يجب استدعاؤه داخل stateMu.Lock()
+func (s *SessionContainer) updateProgress() {
+	total := len(s.state.Tasks)
+	completed := 0
+
+	for _, task := range s.state.Tasks {
+		if task.Status == "completed" {
+			completed++
+		}
+	}
+
+	s.state.Progress.TotalTasks = total
+	s.state.Progress.CompletedTasks = completed
+
+	if total > 0 {
+		s.state.Progress.Percentage = float64(completed) / float64(total) * 100.0
+	} else {
+		s.state.Progress.Percentage = 0.0
+	}
+
+	s.state.UpdatedAt = time.Now()
 }
