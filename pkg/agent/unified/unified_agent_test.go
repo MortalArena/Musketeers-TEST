@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/MortalArena/Musketeers/pkg/session"
 	"github.com/dgraph-io/badger/v4"
 	"go.uber.org/zap/zaptest"
 )
@@ -13,10 +12,8 @@ func TestUnifiedAgent_NewUnifiedAgent(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	sessionID := "test-session"
 	agentID := "test-agent"
-	sessionSkills := session.NewSkillsManager(sessionID)
-	sessionMemory := session.NewCollectiveMemory(sessionID, nil)
 
-	ua := NewUnifiedAgent(sessionID, agentID, sessionSkills, sessionMemory, logger)
+	ua := NewUnifiedAgent(sessionID, agentID, nil, logger)
 
 	if ua == nil {
 		t.Fatal("NewUnifiedAgent returned nil")
@@ -35,10 +32,8 @@ func TestUnifiedAgent_Initialize(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	sessionID := "test-session"
 	agentID := "test-agent"
-	sessionSkills := session.NewSkillsManager(sessionID)
-	sessionMemory := session.NewCollectiveMemory(sessionID, nil)
 
-	ua := NewUnifiedAgent(sessionID, agentID, sessionSkills, sessionMemory, logger)
+	ua := NewUnifiedAgent(sessionID, agentID, nil, logger)
 
 	ctx := context.Background()
 
@@ -52,10 +47,8 @@ func TestUnifiedAgent_RegisterAgent(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	sessionID := "test-session"
 	agentID := "test-agent"
-	sessionSkills := session.NewSkillsManager(sessionID)
-	sessionMemory := session.NewCollectiveMemory(sessionID, nil)
 
-	ua := NewUnifiedAgent(sessionID, agentID, sessionSkills, sessionMemory, logger)
+	ua := NewUnifiedAgent(sessionID, agentID, nil, logger)
 
 	ctx := context.Background()
 
@@ -79,7 +72,6 @@ func TestUnifiedAgent_ExecuteTask(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	sessionID := "test-session"
 	agentID := "test-agent"
-	sessionSkills := session.NewSkillsManager(sessionID)
 
 	// إنشاء قاعدة بيانات مؤقتة للاختبار
 	tempDir := t.TempDir()
@@ -89,9 +81,7 @@ func TestUnifiedAgent_ExecuteTask(t *testing.T) {
 	}
 	defer db.Close()
 
-	sessionMemory := session.NewCollectiveMemory(sessionID, db)
-
-	ua := NewUnifiedAgent(sessionID, agentID, sessionSkills, sessionMemory, logger)
+	ua := NewUnifiedAgent(sessionID, agentID, db, logger)
 
 	ctx := context.Background()
 
@@ -130,10 +120,8 @@ func TestUnifiedAgent_GetSystemSummary(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	sessionID := "test-session"
 	agentID := "test-agent"
-	sessionSkills := session.NewSkillsManager(sessionID)
-	sessionMemory := session.NewCollectiveMemory(sessionID, nil)
 
-	ua := NewUnifiedAgent(sessionID, agentID, sessionSkills, sessionMemory, logger)
+	ua := NewUnifiedAgent(sessionID, agentID, nil, logger)
 
 	ctx := context.Background()
 
@@ -166,7 +154,6 @@ func TestUnifiedAgent_Integration_CompleteWorkflow(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	sessionID := "test-session"
 	agentID := "test-agent"
-	sessionSkills := session.NewSkillsManager(sessionID)
 
 	// إنشاء قاعدة بيانات مؤقتة للاختبار
 	tempDir := t.TempDir()
@@ -176,9 +163,7 @@ func TestUnifiedAgent_Integration_CompleteWorkflow(t *testing.T) {
 	}
 	defer db.Close()
 
-	sessionMemory := session.NewCollectiveMemory(sessionID, db)
-
-	ua := NewUnifiedAgent(sessionID, agentID, sessionSkills, sessionMemory, logger)
+	ua := NewUnifiedAgent(sessionID, agentID, db, logger)
 
 	ctx := context.Background()
 
@@ -224,10 +209,8 @@ func TestUnifiedAgent_Security_ConcurrentOperations(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	sessionID := "test-session"
 	agentID := "test-agent"
-	sessionSkills := session.NewSkillsManager(sessionID)
-	sessionMemory := session.NewCollectiveMemory(sessionID, nil)
 
-	ua := NewUnifiedAgent(sessionID, agentID, sessionSkills, sessionMemory, logger)
+	ua := NewUnifiedAgent(sessionID, agentID, nil, logger)
 
 	ctx := context.Background()
 

@@ -9,10 +9,10 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/agent/automation"
 	"github.com/MortalArena/Musketeers/pkg/agent/direction"
 	"github.com/MortalArena/Musketeers/pkg/agent/integration"
-	"github.com/MortalArena/Musketeers/pkg/agent/skills"
 	"github.com/MortalArena/Musketeers/pkg/agent/subagents"
 	"github.com/MortalArena/Musketeers/pkg/agent/validation"
 	"github.com/MortalArena/Musketeers/pkg/session"
+	"github.com/dgraph-io/badger/v4"
 	"go.uber.org/zap"
 )
 
@@ -21,13 +21,11 @@ type UnifiedAgent struct {
 	sessionID string
 	agentID   string
 
-	// الأنظمة القديمة
-	sessionSkills    *session.SkillsManager
-	sessionMemory    *session.CollectiveMemory
-	collectiveSystem *integration.CollectiveAgentSystem
+	// الأنظمة المدمجة الشاملة
+	unifiedSkillManager  *UnifiedSkillManager
+	unifiedMemoryManager *UnifiedMemoryManager
 
 	// الأنظمة الجديدة من Cursor
-	skillManager        *skills.SkillManager
 	subagentManager     *subagents.SubagentManager
 	automationManager   *automation.AutomationManager
 	skillDirector       *direction.SkillDirector
@@ -38,29 +36,29 @@ type UnifiedAgent struct {
 	flowManager  *FlowManager
 	errorHandler *ErrorHandler
 
-	// أنظمة التكامل
-	skillIntegration  *SkillIntegration
-	memoryIntegration *MemoryIntegration
+	// النظام الجماعي
+	collectiveSystem *integration.CollectiveAgentSystem
 
 	logger *zap.Logger
 	mu     sync.RWMutex
 }
 
 // NewUnifiedAgent ينشئ وكيل موحد جديد
-func NewUnifiedAgent(sessionID, agentID string, sessionSkills *session.SkillsManager, sessionMemory *session.CollectiveMemory, logger *zap.Logger) *UnifiedAgent {
+func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logger) *UnifiedAgent {
 	ua := &UnifiedAgent{
-		sessionID:     sessionID,
-		agentID:       agentID,
-		sessionSkills: sessionSkills,
-		sessionMemory: sessionMemory,
-		logger:        logger,
+		sessionID: sessionID,
+		agentID:   agentID,
+		logger:    logger,
 	}
 
+	// إنشاء الأنظمة المدمجة الشاملة
+	ua.unifiedSkillManager = NewUnifiedSkillManager(sessionID, logger)
+	ua.unifiedMemoryManager = NewUnifiedMemoryManager(sessionID, db, logger)
+
 	// إنشاء الأنظمة الجديدة من Cursor
-	ua.skillManager = skills.NewSkillManager(logger)
 	ua.subagentManager = subagents.NewSubagentManager(logger)
 	ua.automationManager = automation.NewAutomationManager(logger)
-	ua.skillDirector = direction.NewSkillDirector(ua.skillManager, logger)
+	ua.skillDirector = direction.NewSkillDirector(nil, logger) // سيتم تحديثه لاحقاً
 	ua.multiLayerValidator = validation.NewMultiLayerValidator(logger)
 
 	// إنشاء نظام التنسيق المركزي
@@ -68,11 +66,10 @@ func NewUnifiedAgent(sessionID, agentID string, sessionSkills *session.SkillsMan
 	ua.flowManager = NewFlowManager(logger)
 	ua.errorHandler = NewErrorHandler(logger)
 
-	// إنشاء أنظمة التكامل
-	ua.skillIntegration = NewSkillIntegration(ua.sessionSkills, ua.skillManager, logger)
-	ua.memoryIntegration = NewMemoryIntegration(ua.sessionMemory, logger)
-
-	// إنشاء النظام الجماعي
+	// إنشاء النظام الجماعي (مع الأنظمة المدمجة)
+	// نستخدم sessionSkills و sessionMemory من الأنظمة المدمجة
+	sessionSkills := session.NewSkillsManager(sessionID)
+	sessionMemory := session.NewCollectiveMemory(sessionID, db)
 	ua.collectiveSystem = integration.NewCollectiveAgentSystem(sessionID, sessionSkills, sessionMemory, logger)
 
 	return ua
@@ -100,16 +97,6 @@ func (ua *UnifiedAgent) Initialize(ctx context.Context) error {
 	// تهيئة معالج الأخطاء
 	if err := ua.errorHandler.Initialize(ctx); err != nil {
 		return fmt.Errorf("فشل تهيئة معالج الأخطاء: %w", err)
-	}
-
-	// تهيئة تكامل المهارات
-	if err := ua.skillIntegration.Initialize(ctx); err != nil {
-		return fmt.Errorf("فشل تهيئة تكامل المهارات: %w", err)
-	}
-
-	// تهيئة تكامل الذاكرة
-	if err := ua.memoryIntegration.Initialize(ctx); err != nil {
-		return fmt.Errorf("فشل تهيئة تكامل الذاكرة: %w", err)
 	}
 
 	ua.logger.Info("تم تهيئة الوكيل الموحد بنجاح",
@@ -170,12 +157,12 @@ func (ua *UnifiedAgent) RegisterAgent(ctx context.Context, did, agentType, llmTy
 	defer ua.mu.Unlock()
 
 	// [WHY] تسجيل وكيل في النظام الموحد
-	// [HOW] يستخدم تكامل المهارات والذاكرة
+	// [HOW] يستخدم الأنظمة المدمجة الشاملة
 	// [SAFETY] يضمن عدم تكرار التسجيل
 
-	// تسجيل في النظام الجماعي
-	if err := ua.collectiveSystem.RegisterAgent(ctx, did, agentType, llmType, specializations); err != nil {
-		return fmt.Errorf("فشل التسجيل في النظام الجماعي: %w", err)
+	// تسجيل في نظام المهارات الشامل
+	if err := ua.unifiedSkillManager.RegisterAgent(did, agentType); err != nil {
+		return fmt.Errorf("فشل التسجيل في نظام المهارات الشامل: %w", err)
 	}
 
 	// تسجيل في نظام الوكلاء الفرعيين
@@ -208,7 +195,7 @@ func (ua *UnifiedAgent) GetSystemSummary(ctx context.Context) (*UnifiedSystemSum
 	defer ua.mu.RUnlock()
 
 	// [WHY] الحصول على ملخص النظام الموحد
-	// [HOW] يجمع ملخصات جميع الأنظمة
+	// [HOW] يجمع ملخصات جميع الأنظمة المدمجة
 	// [SAFETY] يضمان عدم وجود أخطاء في الجمع
 
 	summary := &UnifiedSystemSummary{
@@ -217,12 +204,11 @@ func (ua *UnifiedAgent) GetSystemSummary(ctx context.Context) (*UnifiedSystemSum
 		Timestamp: time.Now(),
 	}
 
-	// ملخص الأنظمة القديمة
-	collectiveSummary, _ := ua.collectiveSystem.GetSystemSummary(ctx)
-	summary.CollectiveSummary = collectiveSummary
+	// ملخص الأنظمة المدمجة الشاملة
+	summary.SkillSummary = ua.unifiedSkillManager.GetSkillSummary()
+	summary.MemorySummary = ua.unifiedMemoryManager.GetMemorySummary()
 
 	// ملخص الأنظمة الجديدة
-	summary.SkillSummary = ua.skillManager.GetSkillSummary()
 	summary.SubagentSummary = ua.subagentManager.GetSubagentSummary()
 	summary.AutomationSummary = ua.automationManager.GetAutomationSummary()
 	summary.ValidationSummary = ua.multiLayerValidator.GetValidationSummary()
@@ -231,10 +217,6 @@ func (ua *UnifiedAgent) GetSystemSummary(ctx context.Context) (*UnifiedSystemSum
 	summary.CoordinatorSummary = ua.coordinator.GetSummary()
 	summary.FlowManagerSummary = ua.flowManager.GetSummary()
 	summary.ErrorHandlerSummary = ua.errorHandler.GetSummary()
-
-	// ملخص أنظمة التكامل
-	summary.SkillIntegrationSummary = ua.skillIntegration.GetSummary()
-	summary.MemoryIntegrationSummary = ua.memoryIntegration.GetSummary()
 
 	// حساب الجاهزية الكلية
 	summary.OverallReadiness = ua.calculateOverallReadiness()
@@ -286,18 +268,16 @@ type UnifiedTaskResult struct {
 
 // UnifiedSystemSummary ملخص النظام الموحد
 type UnifiedSystemSummary struct {
-	SessionID                string
-	AgentID                  string
-	Timestamp                time.Time
-	CollectiveSummary        map[string]interface{}
-	SkillSummary             map[string]interface{}
-	SubagentSummary          map[string]interface{}
-	AutomationSummary        map[string]interface{}
-	ValidationSummary        map[string]interface{}
-	CoordinatorSummary       map[string]interface{}
-	FlowManagerSummary       map[string]interface{}
-	ErrorHandlerSummary      map[string]interface{}
-	SkillIntegrationSummary  map[string]interface{}
-	MemoryIntegrationSummary map[string]interface{}
-	OverallReadiness         float64
+	SessionID           string
+	AgentID             string
+	Timestamp           time.Time
+	SkillSummary        map[string]interface{}
+	MemorySummary       map[string]interface{}
+	SubagentSummary     map[string]interface{}
+	AutomationSummary   map[string]interface{}
+	ValidationSummary   map[string]interface{}
+	CoordinatorSummary  map[string]interface{}
+	FlowManagerSummary  map[string]interface{}
+	ErrorHandlerSummary map[string]interface{}
+	OverallReadiness    float64
 }

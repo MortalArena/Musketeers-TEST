@@ -12,7 +12,6 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/agent/unified"
 	"github.com/MortalArena/Musketeers/pkg/agent_bridge"
 	nrcrypto "github.com/MortalArena/Musketeers/pkg/crypto"
-	"github.com/MortalArena/Musketeers/pkg/session"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/sirupsen/logrus"
 	"go.uber.org/zap"
@@ -62,16 +61,8 @@ func main() {
 	}
 	defer db.Close()
 
-	// إنشاء نظام المهارات الجماعي للجلسة
-	sessionSkills := session.NewSkillsManager(sessionID)
-	log.Info("تم إنشاء نظام المهارات الجماعي")
-
-	// إنشاء الذاكرة الجماعية للجلسة
-	sessionMemory := session.NewCollectiveMemory(sessionID, db)
-	log.Info("تم إنشاء الذاكرة الجماعية للجلسة")
-
 	// إنشاء النظام الموحد الذي يدمج جميع الأنظمة
-	unifiedAgent := unified.NewUnifiedAgent(sessionID, agentID, sessionSkills, sessionMemory, zapLogger)
+	unifiedAgent := unified.NewUnifiedAgent(sessionID, agentID, db, zapLogger)
 	log.Info("تم إنشاء النظام الموحد")
 
 	// تهيئة النظام الموحد
