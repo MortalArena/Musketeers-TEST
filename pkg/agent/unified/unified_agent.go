@@ -53,6 +53,9 @@ type UnifiedAgent struct {
 	// نظام تنظيم البيانات
 	dataCurator *DataCurator
 
+	// مجدول المهام
+	taskScheduler *TaskScheduler
+
 	// قناة الأحداث
 	eventChannel chan *SessionEvent
 
@@ -104,6 +107,9 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 	// إنشاء نظام تنظيم البيانات
 	ua.dataCurator = NewDataCurator(sessionID, logger)
 
+	// إنشاء مجدول المهام
+	ua.taskScheduler = NewTaskScheduler(sessionID, logger)
+
 	return ua
 }
 
@@ -149,7 +155,13 @@ func (ua *UnifiedAgent) Initialize(ctx context.Context) error {
 	go ua.startMandatoryReadSync(ctx)
 
 	// بدء المزامنة الإجبارية للذاكرة المحلية
-	go ua.localMemoryCache.StartMandatorySync(ctx)
+	go ua.startLocalMemorySync(ctx)
+
+	// بدء مجدول المهام
+	ua.taskScheduler.Start(ctx)
+
+	// بدء تنظيف البيانات الدوري
+	go ua.startDataCuration(ctx)
 
 	ua.logger.Info("تم تهيئة الوكيل الموحد بنجاح",
 		zap.String("session_id", ua.sessionID),
@@ -507,8 +519,23 @@ func (ua *UnifiedAgent) startMandatoryReadSync(ctx context.Context) {
 			ua.logger.Info("تم إيقاف المزامنة الإجبارية للقراءة")
 			return
 		case <-ticker.C:
-			ua.syncNewData(ctx, lastSyncTime)
-			lastSyncTime = time.Now()
+			// تقديم مهمة المزامنة إلى المجدول
+			task := &Task{
+				ID:       fmt.Sprintf("sync_read_%d", time.Now().Unix()),
+				Type:     "sync_read",
+				Priority: PriorityMedium,
+				Execute: func(ctx context.Context) error {
+					ua.syncNewData(ctx, lastSyncTime)
+					lastSyncTime = time.Now()
+					return nil
+				},
+				CreatedAt: time.Now(),
+				Timeout:   30 * time.Second,
+			}
+
+			if err := ua.taskScheduler.SubmitTask(task); err != nil {
+				ua.logger.Error("فشل تقديم مهمة المزامنة للقراءة", zap.Error(err))
+			}
 		}
 	}
 }
@@ -543,4 +570,75 @@ func (ua *UnifiedAgent) updateLocalMemory(summary interface{}) {
 func (ua *UnifiedAgent) updateLocalSkills(summary interface{}) {
 	// تحديث المهارات المحلية بالملخص الحالي
 	// هذا يضمن أن الوكيل لديه نسخة محلية محدثة
+}
+
+// startLocalMemorySync يبدأ المزامنة الإجبارية للذاكرة المحلية
+func (ua *UnifiedAgent) startLocalMemorySync(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			ua.logger.Info("تم إيقاف المزامنة الإجبارية للذاكرة المحلية")
+			return
+		case <-ticker.C:
+			// تقديم مهمة المزامنة إلى المجدول
+			task := &Task{
+				ID:       fmt.Sprintf("sync_memory_%d", time.Now().Unix()),
+				Type:     "sync_memory",
+				Priority: PriorityLow,
+				Execute: func(ctx context.Context) error {
+					ua.localMemoryCache.syncToSharedDB(ctx)
+					return nil
+				},
+				CreatedAt: time.Now(),
+				Timeout:   30 * time.Second,
+			}
+
+			if err := ua.taskScheduler.SubmitTask(task); err != nil {
+				ua.logger.Error("فشل تقديم مهمة المزامنة للذاكرة المحلية", zap.Error(err))
+			}
+		}
+	}
+}
+
+// startDataCuration يبدأ تنظيف البيانات الدوري
+func (ua *UnifiedAgent) startDataCuration(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			ua.logger.Info("تم إيقاف تنظيف البيانات الدوري")
+			return
+		case <-ticker.C:
+			// تقديم مهمة تنظيف البيانات إلى المجدول
+			task := &Task{
+				ID:       fmt.Sprintf("curate_data_%d", time.Now().Unix()),
+				Type:     "curate_data",
+				Priority: PriorityLow,
+				Execute: func(ctx context.Context) error {
+					// تنظيف البيانات من الذاكرة المحلية
+					memoryEvents := ua.localMemoryCache.GetMemoryEvents()
+					curatedEvents := ua.dataCurator.CurateMemoryEvents(memoryEvents)
+					ua.localMemoryCache.UpdateMemoryEvents(curatedEvents)
+
+					// تنظيف تحديثات المهارات
+					skillUpdates := ua.localMemoryCache.GetSkillUpdates()
+					curatedUpdates := ua.dataCurator.CurateSkillUpdates(skillUpdates)
+					ua.localMemoryCache.UpdateSkillUpdates(curatedUpdates)
+
+					return nil
+				},
+				CreatedAt: time.Now(),
+				Timeout:   60 * time.Second,
+			}
+
+			if err := ua.taskScheduler.SubmitTask(task); err != nil {
+				ua.logger.Error("فشل تقديم مهمة تنظيف البيانات", zap.Error(err))
+			}
+		}
+	}
 }
