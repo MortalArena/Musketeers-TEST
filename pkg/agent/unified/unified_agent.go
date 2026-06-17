@@ -44,6 +44,12 @@ type UnifiedAgent struct {
 	realTimeMemorySync *RealTimeMemorySync
 	realTimeSkillSync  *RealTimeSkillSync
 
+	// نظام تسجيل المشاكل والحلول
+	problemSolutionRegistry *ProblemSolutionRegistry
+
+	// الذاكرة المحلية
+	localMemoryCache *LocalMemoryCache
+
 	// قناة الأحداث
 	eventChannel chan *SessionEvent
 
@@ -85,6 +91,12 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 	ua.realTimeMemorySync = NewRealTimeMemorySync(sessionID, logger)
 	ua.realTimeSkillSync = NewRealTimeSkillSync(sessionID, logger)
 	ua.eventChannel = make(chan *SessionEvent, 100)
+
+	// إنشاء نظام تسجيل المشاكل والحلول
+	ua.problemSolutionRegistry = NewProblemSolutionRegistry(sessionID, logger)
+
+	// إنشاء الذاكرة المحلية
+	ua.localMemoryCache = NewLocalMemoryCache(sessionID, agentID, logger)
 
 	return ua
 }
@@ -129,6 +141,9 @@ func (ua *UnifiedAgent) Initialize(ctx context.Context) error {
 
 	// بدء المزامنة الإجبارية للقراءة
 	go ua.startMandatoryReadSync(ctx)
+
+	// بدء المزامنة الإجبارية للذاكرة المحلية
+	go ua.localMemoryCache.StartMandatorySync(ctx)
 
 	ua.logger.Info("تم تهيئة الوكيل الموحد بنجاح",
 		zap.String("session_id", ua.sessionID),
