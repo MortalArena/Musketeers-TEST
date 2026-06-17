@@ -170,6 +170,8 @@ func (cas *CollectiveAgentSystem) ExecuteTask(ctx context.Context, task string, 
 	cas.progressTracker.AddCheckpoint(ctx, "task_started", "بدء تنفيذ المهمة", "completed", nil)
 
 	// 4. تنفيذ الخطوات الفرعية
+	// [TODO] استدعاء LLM حقيقي لتنفيذ المهام بدلاً من المحاكاة
+	// في التنفيذ الحالي، يتم استخدام نص ثابت للمحاكاة
 	results := make([]map[string]interface{}, 0)
 	for i, subTask := range subTasks {
 		cas.progressTracker.IncrementStep(ctx)
