@@ -50,6 +50,9 @@ type UnifiedAgent struct {
 	// الذاكرة المحلية
 	localMemoryCache *LocalMemoryCache
 
+	// نظام تنظيم البيانات
+	dataCurator *DataCurator
+
 	// قناة الأحداث
 	eventChannel chan *SessionEvent
 
@@ -97,6 +100,9 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 
 	// إنشاء الذاكرة المحلية
 	ua.localMemoryCache = NewLocalMemoryCache(sessionID, agentID, logger)
+
+	// إنشاء نظام تنظيم البيانات
+	ua.dataCurator = NewDataCurator(sessionID, logger)
 
 	return ua
 }
