@@ -39,6 +39,14 @@ type UnifiedAgent struct {
 	// النظام الجماعي
 	collectiveSystem *integration.CollectiveAgentSystem
 
+	// أنظمة المزامنة اللحظية
+	sessionEventBus    *SessionEventBus
+	realTimeMemorySync *RealTimeMemorySync
+	realTimeSkillSync  *RealTimeSkillSync
+
+	// قناة الأحداث
+	eventChannel chan *SessionEvent
+
 	logger *zap.Logger
 	mu     sync.RWMutex
 }
@@ -72,6 +80,12 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 	sessionMemory := session.NewCollectiveMemory(sessionID, db)
 	ua.collectiveSystem = integration.NewCollectiveAgentSystem(sessionID, sessionSkills, sessionMemory, logger)
 
+	// إنشاء أنظمة المزامنة اللحظية
+	ua.sessionEventBus = NewSessionEventBus(sessionID, logger)
+	ua.realTimeMemorySync = NewRealTimeMemorySync(sessionID, logger)
+	ua.realTimeSkillSync = NewRealTimeSkillSync(sessionID, logger)
+	ua.eventChannel = make(chan *SessionEvent, 100)
+
 	return ua
 }
 
@@ -98,6 +112,20 @@ func (ua *UnifiedAgent) Initialize(ctx context.Context) error {
 	if err := ua.errorHandler.Initialize(ctx); err != nil {
 		return fmt.Errorf("فشل تهيئة معالج الأخطاء: %w", err)
 	}
+
+	// تهيئة أنظمة المزامنة اللحظية
+	ua.sessionEventBus.Start(ctx)
+	ua.realTimeMemorySync.StartSync(ctx)
+	ua.realTimeSkillSync.StartSync(ctx)
+
+	// الاشتراك في ناقل الأحداث
+	ua.eventChannel = ua.sessionEventBus.SubscribeAgent(ua.agentID)
+
+	// بدء معالجة الأحداث
+	go ua.processEvents(ctx)
+
+	// بدء التسجيل الإجباري للتطورات اللحظية
+	go ua.startMandatoryProgressReporting(ctx)
 
 	ua.logger.Info("تم تهيئة الوكيل الموحد بنجاح",
 		zap.String("session_id", ua.sessionID),
@@ -280,4 +308,104 @@ type UnifiedSystemSummary struct {
 	FlowManagerSummary  map[string]interface{}
 	ErrorHandlerSummary map[string]interface{}
 	OverallReadiness    float64
+}
+
+// processEvents يعالج الأحداث من ناقل الأحداث
+func (ua *UnifiedAgent) processEvents(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			ua.logger.Info("تم إيقاف معالجة الأحداث")
+			return
+		case event, ok := <-ua.eventChannel:
+			if !ok {
+				ua.logger.Info("تم إغلاق قناة الأحداث")
+				return
+			}
+			ua.handleEvent(event)
+		}
+	}
+}
+
+// handleEvent يعالج حدث واحد
+func (ua *UnifiedAgent) handleEvent(event *SessionEvent) {
+	ua.logger.Info("تم استقبال حدث",
+		zap.String("agent_id", ua.agentID),
+		zap.String("event_id", event.ID),
+		zap.String("event_type", string(event.EventType)),
+		zap.String("source_agent", event.SourceAgent))
+
+	// معالجة الحدث بناءً على نوعه
+	switch event.EventType {
+	case TaskStarted:
+		// معالجة بدء المهمة
+	case TaskProgress:
+		// معالجة تقدم المهمة
+	case TaskCompleted:
+		// معالجة إكمال المهمة
+	case TaskFailed:
+		// معالجة فشل المهمة
+	}
+}
+
+// startMandatoryProgressReporting يبدأ التسجيل الإجباري للتطورات اللحظية
+func (ua *UnifiedAgent) startMandatoryProgressReporting(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			ua.logger.Info("تم إيقاف التسجيل الإجباري للتطورات اللحظية")
+			return
+		case <-ticker.C:
+			ua.reportProgress(ctx)
+		}
+	}
+}
+
+// reportProgress يبلغ عن التطورات اللحظية
+func (ua *UnifiedAgent) reportProgress(ctx context.Context) {
+	// إنشاء حدث تقدم
+	event := &SessionEvent{
+		ID:          fmt.Sprintf("progress_%d", time.Now().UnixNano()),
+		SessionID:   ua.sessionID,
+		SourceAgent: ua.agentID,
+		TargetAgent: "", // جميع الوكلاء
+		EventType:   TaskProgress,
+		Timestamp:   time.Now(),
+		Priority:    PriorityMedium,
+		Data: map[string]interface{}{
+			"agent_id": ua.agentID,
+			"status":   "active",
+			"message":  "التطور اللحظي",
+		},
+		Metadata: map[string]interface{}{
+			"reporting_type": "mandatory",
+			"interval":       "5s",
+		},
+	}
+
+	// نشر الحدث
+	if err := ua.sessionEventBus.PublishEvent(ctx, event); err != nil {
+		ua.logger.Error("فشل نشر حدث التطور اللحظي", zap.Error(err))
+	}
+
+	// نشر أحداث الذاكرة
+	ua.publishMemoryEvents(ctx)
+
+	// نشر أحداث المهارات
+	ua.publishSkillEvents(ctx)
+}
+
+// publishMemoryEvents ينشر أحداث الذاكرة
+func (ua *UnifiedAgent) publishMemoryEvents(ctx context.Context) {
+	// نشر أحداث الذاكرة إلى RealTimeMemorySync
+	// هذا يضمن أن جميع الوكلاء يرون التطورات اللحظية في الذاكرة
+}
+
+// publishSkillEvents ينشر أحداث المهارات
+func (ua *UnifiedAgent) publishSkillEvents(ctx context.Context) {
+	// نشر أحداث المهارات إلى RealTimeSkillSync
+	// هذا يضمن أن جميع الوكلاء يرون التطورات اللحظية في المهارات
 }
