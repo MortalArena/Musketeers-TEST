@@ -31,6 +31,9 @@ type SessionManager struct {
 	skillSync  *RealTimeSkillSync
 	eventBus   *SessionEventBus
 
+	// مجدول المهام
+	taskScheduler *TaskScheduler
+
 	// منفذ المهام (بدلاً من unifiedAgent لتجنب الدورة المرجعية)
 	agentExecutor AgentExecutor
 }
@@ -112,6 +115,7 @@ func NewSessionManager(sessionID string, logger *zap.Logger) *SessionManager {
 		memorySync:               NewRealTimeMemorySync(sessionID, logger),
 		skillSync:                NewRealTimeSkillSync(sessionID, logger),
 		eventBus:                 NewSessionEventBus(sessionID, logger),
+		taskScheduler:            NewTaskScheduler(sessionID, logger),
 	}
 }
 
@@ -132,6 +136,9 @@ func (sm *SessionManager) Initialize(ctx context.Context, agentExecutor AgentExe
 
 	// بدء مزامنة المهارات
 	sm.skillSync.StartSync(ctx)
+
+	// بدء مجدول المهام
+	sm.taskScheduler.Start(ctx)
 
 	sm.logger.Info("تم تهيئة مدير الجلسة",
 		zap.String("session_id", sm.sessionID),
