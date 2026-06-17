@@ -52,7 +52,7 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 	}
 
 	// إنشاء الأنظمة المدمجة الشاملة
-	ua.unifiedSkillManager = NewUnifiedSkillManager(sessionID, logger)
+	ua.unifiedSkillManager = NewUnifiedSkillManager(sessionID, db, logger)
 	ua.unifiedMemoryManager = NewUnifiedMemoryManager(sessionID, db, logger)
 
 	// إنشاء الأنظمة الجديدة من Cursor

@@ -2,6 +2,7 @@ package unified
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dgraph-io/badger/v4"
 	"go.uber.org/zap"
 )
 
@@ -17,6 +19,9 @@ type UnifiedSkillManager struct {
 	sessionID string
 	logger    *zap.Logger
 	mu        sync.RWMutex
+
+	// قاعدة البيانات المشتركة
+	db *badger.DB
 
 	// مهارات الوكلاء (من sessionSkills)
 	agentSkills map[string]*AgentSkill
@@ -101,10 +106,11 @@ type SkillResult struct {
 }
 
 // NewUnifiedSkillManager ينشئ مدير مهارات شامل جديد
-func NewUnifiedSkillManager(sessionID string, logger *zap.Logger) *UnifiedSkillManager {
+func NewUnifiedSkillManager(sessionID string, db *badger.DB, logger *zap.Logger) *UnifiedSkillManager {
 	return &UnifiedSkillManager{
 		sessionID:      sessionID,
 		logger:         logger,
+		db:             db,
 		agentSkills:    make(map[string]*AgentSkill),
 		platformSkills: make(map[string]*PlatformSkill),
 		skillDirs:      []string{},
@@ -150,6 +156,18 @@ func (usm *UnifiedSkillManager) RegisterAgent(agentDID, agentType string) error 
 	}
 
 	usm.agentSkills[agentDID] = skill
+
+	// حفظ في قاعدة البيانات المشتركة باستخدام sessionID كـ prefix
+	if usm.db != nil {
+		key := []byte(fmt.Sprintf("%s:agent_skills:%s", usm.sessionID, agentDID))
+		value, _ := json.Marshal(skill)
+		if err := usm.db.Update(func(txn *badger.Txn) error {
+			return txn.Set(key, value)
+		}); err != nil {
+			usm.logger.Error("فشل حفظ مهارات الوكيل في قاعدة البيانات", zap.Error(err))
+		}
+	}
+
 	usm.logger.Info("تم تسجيل وكيل في نظام المهارات الشامل",
 		zap.String("agent_did", agentDID),
 		zap.String("agent_type", agentType))
@@ -206,6 +224,17 @@ func (usm *UnifiedSkillManager) RecordTaskCompletion(agentDID string, task Skill
 
 	// تحديث المستوى العام
 	skill.OverallLevel = usm.calculateOverallLevel(skill)
+
+	// حفظ في قاعدة البيانات المشتركة باستخدام sessionID كـ prefix
+	if usm.db != nil {
+		key := []byte(fmt.Sprintf("%s:agent_skills:%s", usm.sessionID, agentDID))
+		value, _ := json.Marshal(skill)
+		if err := usm.db.Update(func(txn *badger.Txn) error {
+			return txn.Set(key, value)
+		}); err != nil {
+			usm.logger.Error("فشل حفظ مهارات الوكيل في قاعدة البيانات", zap.Error(err))
+		}
+	}
 
 	return nil
 }

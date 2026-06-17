@@ -79,13 +79,13 @@ type MemoryWorkflow struct {
 
 // MemoryStrategy استراتيجية في الذاكرة الاستراتيجية
 type MemoryStrategy struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Context     []string               `json:"context"`
-	Effectiveness float64              `json:"effectiveness"`
-	UsageCount  int                    `json:"usage_count"`
-	Timestamp   time.Time              `json:"timestamp"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description"`
+	Context       []string  `json:"context"`
+	Effectiveness float64   `json:"effectiveness"`
+	UsageCount    int       `json:"usage_count"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 // MemoryItem عنصر ذاكرة داخلي (من agentMemory)
@@ -127,9 +127,9 @@ func (umm *UnifiedMemoryManager) RecordEvent(event MemoryEvent) error {
 	umm.episodic = append(umm.episodic, event)
 	umm.totalEvents++
 
-	// حفظ في قاعدة البيانات
+	// حفظ في قاعدة البيانات المشتركة باستخدام sessionID كـ prefix
 	if umm.db != nil {
-		key := []byte(fmt.Sprintf("episodic:%s", event.ID))
+		key := []byte(fmt.Sprintf("%s:episodic:%s", umm.sessionID, event.ID))
 		value, _ := json.Marshal(event)
 		if err := umm.db.Update(func(txn *badger.Txn) error {
 			return txn.Set(key, value)
@@ -158,9 +158,9 @@ func (umm *UnifiedMemoryManager) AddFact(fact MemoryFact) error {
 	umm.semantic = append(umm.semantic, fact)
 	umm.totalFacts++
 
-	// حفظ في قاعدة البيانات
+	// حفظ في قاعدة البيانات المشتركة باستخدام sessionID كـ prefix
 	if umm.db != nil {
-		key := []byte(fmt.Sprintf("semantic:%s", fact.ID))
+		key := []byte(fmt.Sprintf("%s:semantic:%s", umm.sessionID, fact.ID))
 		value, _ := json.Marshal(fact)
 		if err := umm.db.Update(func(txn *badger.Txn) error {
 			return txn.Set(key, value)
@@ -189,9 +189,9 @@ func (umm *UnifiedMemoryManager) AddWorkflow(workflow MemoryWorkflow) error {
 	umm.procedural = append(umm.procedural, workflow)
 	umm.totalWorkflows++
 
-	// حفظ في قاعدة البيانات
+	// حفظ في قاعدة البيانات المشتركة باستخدام sessionID كـ prefix
 	if umm.db != nil {
-		key := []byte(fmt.Sprintf("procedural:%s", workflow.ID))
+		key := []byte(fmt.Sprintf("%s:procedural:%s", umm.sessionID, workflow.ID))
 		value, _ := json.Marshal(workflow)
 		if err := umm.db.Update(func(txn *badger.Txn) error {
 			return txn.Set(key, value)
@@ -220,9 +220,9 @@ func (umm *UnifiedMemoryManager) AddStrategy(strategy MemoryStrategy) error {
 	umm.meta = append(umm.meta, strategy)
 	umm.totalStrategies++
 
-	// حفظ في قاعدة البيانات
+	// حفظ في قاعدة البيانات المشتركة باستخدام sessionID كـ prefix
 	if umm.db != nil {
-		key := []byte(fmt.Sprintf("meta:%s", strategy.ID))
+		key := []byte(fmt.Sprintf("%s:meta:%s", umm.sessionID, strategy.ID))
 		value, _ := json.Marshal(strategy)
 		if err := umm.db.Update(func(txn *badger.Txn) error {
 			return txn.Set(key, value)
@@ -260,9 +260,9 @@ func (umm *UnifiedMemoryManager) AddMemory(ctx context.Context, memoryType, cont
 	// إضافة إلى الذاكرة الداخلية
 	umm.internalMemory[id] = item
 
-	// حفظ في قاعدة البيانات
+	// حفظ في قاعدة البيانات المشتركة باستخدام sessionID كـ prefix
 	if umm.db != nil {
-		key := []byte(fmt.Sprintf("internal:%s", id))
+		key := []byte(fmt.Sprintf("%s:internal:%s", umm.sessionID, id))
 		value, _ := json.Marshal(item)
 		if err := umm.db.Update(func(txn *badger.Txn) error {
 			return txn.Set(key, value)
