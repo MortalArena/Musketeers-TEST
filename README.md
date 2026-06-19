@@ -68,6 +68,103 @@ Musketeers is built on a **6-layer architecture**, each layer composable and ind
 | `pkg/discovery` | Agent discovery with indexed search |
 | `pkg/sdk` | Lightweight facade layer for external consumers |
 | `pkg/gateway` | HTTP/HTTPS gateway for browser access to `.ia` sites |
+| `pkg/providers` | AI Model Provider integration system with 34+ providers |
+
+---
+
+## 🤖 AI Model Provider Integration
+
+Musketeers includes a comprehensive AI model provider system that supports 34+ providers with 100+ models:
+
+### Supported Providers
+
+**Official Providers (31):**
+- OpenAI, Anthropic, Google, DeepSeek, xAI, Qwen, Moonshot, Mistral, Cohere, NVIDIA, ByteDance, Kling, Xiaomi, Z.ai, Microsoft, Recraft, Sourceful, Poolside, Tencent, StepFun, Nex AGI, Relace, AllenAI, Arcee AI, Inflection, Canopy Labs, Sesame, Zyphra, Sentence Transformers, OpenRouter
+
+**Local Providers (2):**
+- Ollama (local LLM runtime)
+- Studio AI LM (custom local models)
+
+**Custom Provider (1):**
+- Custom API integration for user-defined models
+
+### Features
+
+- ✅ **Smart Routing** - Intelligent model selection based on cost, latency, and availability
+- ✅ **Free Model Priority** - Automatic preference for free-tier models
+- ✅ **Local Model Support** - First-class support for local models via Ollama
+- ✅ **Custom API Integration** - Add your own models and APIs
+- ✅ **Usage Tracking** - Monitor token usage, costs, and performance
+- ✅ **Streaming Support** - Real-time streaming completions
+- ✅ **Fallback Logic** - Automatic failover between providers
+- ✅ **Capability Matching** - Automatic selection based on required capabilities (vision, code, long context, etc.)
+
+### Usage Example
+
+```go
+import "musketeers/pkg/providers"
+
+// Get the provider registry
+registry := providers.NewProviderRegistry()
+
+// Configure the smart router
+routerConfig := providers.RouterConfig{
+    PreferFreeModels:    true,
+    PreferLocalModels:   true,
+    MaxRetries:          3,
+    FallbackEnabled:     true,
+    CostOptimization:    true,
+}
+
+router := providers.NewRouter(registry, routerConfig)
+
+// Create a completion request
+req := &providers.CompletionRequest{
+    Model: "auto", // Let router choose
+    Messages: []providers.Message{
+        {Role: providers.RoleUser, Content: "Hello!"},
+    },
+    Temperature: 0.7,
+    Stream:      false,
+}
+
+// Route and execute
+ctx := context.Background()
+response, err := router.Route(ctx, req)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println(response.Content)
+```
+
+### Model Catalog
+
+The `models.json` file contains a comprehensive catalog of all supported models with:
+- Model capabilities (text, vision, code, streaming, etc.)
+- Context window sizes
+- Pricing information
+- Categories (chat, code, vision, local, free, etc.)
+
+### Adding Custom Models
+
+```go
+// Get the custom provider
+customProvider, _ := registry.Get(providers.ProviderCustom)
+
+// Add a custom model configuration
+config := custom.CustomModelConfig{
+    ID:            "my-custom-model",
+    Name:          "My Custom Model",
+    BaseURL:       "https://api.example.com/v1",
+    APIKey:        "your-api-key",
+    ContextLength: 32000,
+    Capabilities:  []string{"text", "streaming"},
+    APIFormat:     "openai",
+}
+
+customProvider.AddCustomModel(config)
+```
 
 ---
 
