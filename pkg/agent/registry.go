@@ -48,6 +48,13 @@ type AgentMetadata struct {
 	LastSeen      time.Time              `json:"last_seen"`
 	Tags          []string               `json:"tags"`
 	Config        map[string]interface{} `json:"config"`
+	// معلومات التتبع المتعدد
+	InstanceID      string `json:"instance_id"`       // معرف فريد للنسخة (مثلاً: claude-4.8-1, claude-4.8-2)
+	HumanClientID   string `json:"human_client_id"`   // معرف العميل البشري المالك
+	HumanClientName string `json:"human_client_name"` // اسم العميل البشري المالك
+	APIKeyID        string `json:"api_key_id"`        // معرف مفتاح API (للتمييز بين مفاتيح متعددة)
+	APIKeyLabel     string `json:"api_key_label"`     // وصف مفتاح API (مثلاً: "Production Key #1")
+	SessionID       string `json:"session_id"`        // معرف الجلسة الحالية
 }
 
 // AgentStats إحصائيات الوكيل
@@ -113,11 +120,33 @@ func (ar *AgentRegistry) Register(agent UnifiedAgent, metadata *AgentMetadata) e
 			LastSeen:      time.Now(),
 			Tags:          []string{},
 			Config:        make(map[string]interface{}),
+			// معلومات التتبع المتعدد من AgentInfo
+			InstanceID:      info.InstanceID,
+			HumanClientID:   info.HumanClientID,
+			HumanClientName: info.HumanClientName,
+			APIKeyID:        info.APIKeyID,
+			APIKeyLabel:     info.APIKeyLabel,
 		}
 	} else {
 		metadata.AgentID = agentID
 		metadata.RegisteredAt = time.Now()
 		metadata.LastSeen = time.Now()
+		// تحديث معلومات التتبع المتعدد إذا لم تكن موجودة
+		if metadata.InstanceID == "" {
+			metadata.InstanceID = info.InstanceID
+		}
+		if metadata.HumanClientID == "" {
+			metadata.HumanClientID = info.HumanClientID
+		}
+		if metadata.HumanClientName == "" {
+			metadata.HumanClientName = info.HumanClientName
+		}
+		if metadata.APIKeyID == "" {
+			metadata.APIKeyID = info.APIKeyID
+		}
+		if metadata.APIKeyLabel == "" {
+			metadata.APIKeyLabel = info.APIKeyLabel
+		}
 	}
 
 	ar.metadata[agentID] = metadata

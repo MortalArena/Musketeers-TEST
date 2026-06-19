@@ -57,6 +57,12 @@ type AgentInfo struct {
 	MaxTokens     int       `json:"max_tokens"`
 	ContextWindow int       `json:"context_window"`
 	CreatedAt     time.Time `json:"created_at"`
+	// معلومات التتبع المتعدد
+	InstanceID      string `json:"instance_id"`       // معرف فريد للنسخة (مثلاً: claude-4.8-1, claude-4.8-2)
+	HumanClientID   string `json:"human_client_id"`   // معرف العميل البشري المالك
+	HumanClientName string `json:"human_client_name"` // اسم العميل البشري المالك
+	APIKeyID        string `json:"api_key_id"`        // معرف مفتاح API (للتمييز بين مفاتيح متعددة)
+	APIKeyLabel     string `json:"api_key_label"`     // وصف مفتاح API (مثلاً: "Production Key #1")
 }
 
 // AgentResponse رد الوكيل

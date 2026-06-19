@@ -31,8 +31,6 @@ type SessionContainer struct {
 	Memory     *CollectiveMemory
 	Skills     *SkillsManager
 	Workflow   *WorkflowEngine
-	Roles      *RolesManager
-	Chat       *ChatHistory
 	Artifacts  *ArtifactsStore
 	Tasks      *TaskManager
 	Progress   *ProgressTracker
@@ -40,7 +38,7 @@ type SessionContainer struct {
 	Aggregator *Aggregator
 	Reviewer   *FinalReviewer
 
-	// [WHY] ChatManager الجديد لإدارة الرسائل
+	// [WHY] ChatManager لإدارة الرسائل
 	ChatManager *ChatManager
 
 	// [WHY] UnifiedSessionState الحالة الموحدة للجلسة
@@ -134,8 +132,6 @@ func NewSessionContainer(ctx context.Context, db *badger.DB, config *SessionConf
 	session.Memory = NewCollectiveMemory(session.ID, db)
 	session.Skills = NewSkillsManager(session.ID)
 	session.Workflow = NewWorkflowEngine(session.ID)
-	session.Roles = NewRolesManager(session.ID)
-	session.Chat = NewChatHistory(session.ID)
 	session.Artifacts = NewArtifactsStore(session.ID, db)
 	session.Tasks = NewTaskManager(session.ID)
 	session.Progress = NewProgressTracker(session.ID)
@@ -143,7 +139,7 @@ func NewSessionContainer(ctx context.Context, db *badger.DB, config *SessionConf
 	session.Aggregator = NewAggregator(session.ID)
 	session.Reviewer = NewFinalReviewer()
 
-	// [WHY] تهيئة ChatManager الجديد
+	// [WHY] تهيئة ChatManager
 	session.ChatManager = NewChatManager(session.ID, eb)
 
 	// [WHY] تهيئة الحالة الموحدة
