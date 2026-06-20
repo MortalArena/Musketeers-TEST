@@ -78,7 +78,12 @@ func ApprovalMiddleware(engine *policy.ApprovalEngine) Middleware {
 			return next(ctx, principal, cmd)
 		}
 		id := fmt.Sprintf("%s:%s", principal.DID, cmd.Name())
-		if err := engine.Request(policy.ApprovalRequest{ID: id, Actor: principal.DID, Action: cmd.Name(), Resource: "capability:" + cmd.Name(), Context: cmd.Args()}); err != nil {
+		// [SAFETY] Default to single-level approval for backward compatibility
+		requiredLevel := 1
+		if level, ok := cmd.Args()["approval_level"].(int); ok && level > 0 {
+			requiredLevel = level
+		}
+		if err := engine.Request(policy.ApprovalRequest{ID: id, Actor: principal.DID, Action: cmd.Name(), Resource: "capability:" + cmd.Name(), Context: cmd.Args()}, requiredLevel); err != nil {
 			if _, existsErr := engine.Status(id); existsErr == nil {
 				status, _ := engine.Status(id)
 				if status.State == policy.ApprovalStatePending {

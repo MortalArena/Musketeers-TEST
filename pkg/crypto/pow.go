@@ -14,16 +14,17 @@ import (
 )
 
 const (
-	// ✅ صعوبة ثابتة على 1 فقط - لا تغيير ديناميكي
-	// لضمان عدم توقف أي جهاز مهما كانت إمكانياته
-	DefaultPowDifficulty = 1 // ثابت على 1 فقط
-	MinPowDifficulty     = 1 // ثابت على 1 فقط
-	MaxPowDifficulty     = 1 // ثابت على 1 فقط
+	// [SAFETY] Low PoW difficulty for fast identity verification
+	// [WHY] We're proving identity, not mining crypto - needs to be fast (< 1 second)
+	// [HOW] Difficulty 1 provides basic proof while remaining fast
+	DefaultPowDifficulty = 1 // Fast mining for identity verification
+	MinPowDifficulty     = 1 // Minimum difficulty
+	MaxPowDifficulty     = 4 // Maximum for special cases
 
-	// معاملات scrypt منخفضة جداً للأجهزة الضعيفة
-	ScryptN = 1 << 14 // 16,384 (منخفض جداً للأجهزة الضعيفة)
-	ScryptR = 4       // منخفض جداً
-	ScryptP = 1       // منخفض جداً
+	// [SAFETY] Balanced scrypt parameters for speed and security
+	ScryptN = 1 << 15 // 32,768 - balanced for speed
+	ScryptR = 8
+	ScryptP = 1
 	KeyLen  = 32
 
 	// Salt ثابت للشبكة

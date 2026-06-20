@@ -21,7 +21,7 @@ type MockMailbox struct {
 	pubKey     []byte
 }
 
-func (m *MockMailbox) Send(sender, recipient string, payload, pubKey []byte) error {
+func (m *MockMailbox) Send(sender, recipient string, payload, pubKey []byte, privKey *[32]byte) error {
 	m.sendCalled = true
 	m.sender = sender
 	m.recipient = recipient
@@ -46,8 +46,12 @@ func TestWebhookRouter_ProcessWebhook(t *testing.T) {
 	// 2. إنشاء مفتاح عام وهمي
 	pub, _, _ := ed25519.GenerateKey(nil)
 
-	// 3. اختبار نجاح المعالجة
-	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, validSig, pub)
+	// 3. إنشاء مفتاح خاص وهمي
+	var privKey [32]byte
+	copy(privKey[:], []byte("dummy_private_key_32_bytes!!"))
+
+	// 4. اختبار نجاح المعالجة
+	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, validSig, pub, &privKey)
 	if err != nil {
 		t.Fatalf("Expected success, got error: %v", err)
 	}
@@ -64,7 +68,9 @@ func TestWebhookRouter_ProcessWebhook_InvalidSignature(t *testing.T) {
 	// اختبار فشل المعالجة بتوقيع خاطئ
 	invalidSig := "sha256=invalidsignature"
 	pub, _, _ := ed25519.GenerateKey(nil)
-	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, invalidSig, pub)
+	var privKey [32]byte
+	copy(privKey[:], []byte("dummy_private_key_32_bytes!!"))
+	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, invalidSig, pub, &privKey)
 	if err == nil || err.Error() != "invalid webhook signature" {
 		t.Errorf("Expected invalid signature error, got: %v", err)
 	}
@@ -121,7 +127,9 @@ func TestWebhookRouter_EmptyPayload(t *testing.T) {
 	validSig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
 	pub, _, _ := ed25519.GenerateKey(nil)
-	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, validSig, pub)
+	var privKey [32]byte
+	copy(privKey[:], []byte("dummy_private_key_32_bytes!!"))
+	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, validSig, pub, &privKey)
 	if err != nil {
 		t.Fatalf("Expected success with empty payload, got error: %v", err)
 	}
@@ -145,7 +153,9 @@ func TestWebhookRouter_LargePayload(t *testing.T) {
 	validSig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
 	pub, _, _ := ed25519.GenerateKey(nil)
-	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", largePayload, validSig, pub)
+	var privKey [32]byte
+	copy(privKey[:], []byte("dummy_private_key_32_bytes!!"))
+	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", largePayload, validSig, pub, &privKey)
 	if err != nil {
 		t.Fatalf("Expected success with large payload, got error: %v", err)
 	}
@@ -165,7 +175,9 @@ func TestWebhookRouter_SpecialCharactersInPayload(t *testing.T) {
 	validSig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
 	pub, _, _ := ed25519.GenerateKey(nil)
-	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, validSig, pub)
+	var privKey [32]byte
+	copy(privKey[:], []byte("dummy_private_key_32_bytes!!"))
+	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, validSig, pub, &privKey)
 	if err != nil {
 		t.Fatalf("Expected success with special characters, got error: %v", err)
 	}
@@ -188,7 +200,9 @@ func TestWebhookRouter_DifferentSecretKeys(t *testing.T) {
 	router := NewWebhookRouter(secret2, mockMb)
 
 	pub, _, _ := ed25519.GenerateKey(nil)
-	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, sig1, pub)
+	var privKey [32]byte
+	copy(privKey[:], []byte("dummy_private_key_32_bytes!!"))
+	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, sig1, pub, &privKey)
 	if err == nil || err.Error() != "invalid webhook signature" {
 		t.Errorf("Expected invalid signature error with different secret, got: %v", err)
 	}
@@ -202,7 +216,9 @@ func TestWebhookRouter_EmptySignature(t *testing.T) {
 
 	payload := []byte(`{"event": "push"}`)
 	pub, _, _ := ed25519.GenerateKey(nil)
-	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, "", pub)
+	var privKey [32]byte
+	copy(privKey[:], []byte("dummy_private_key_32_bytes!!"))
+	err := router.ProcessWebhook("did:mskt:github", "did:mskt:user123", payload, "", pub, &privKey)
 	if err == nil || err.Error() != "invalid webhook signature" {
 		t.Errorf("Expected invalid signature error with empty signature, got: %v", err)
 	}

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
@@ -336,16 +337,48 @@ func (n *Node) PublishChannelMessage(ctx context.Context, channelID, content str
 
 // ResolvePublicKey يجلب المفتاح العام من DID (KeyResolver)
 func (n *Node) ResolvePublicKey(did string) (ed25519.PublicKey, error) {
-	n.keyCacheMu.RLock()
-	if pub, ok := n.keyCache()[did]; ok {
-		n.keyCacheMu.RUnlock()
-		return pub, nil
-	}
-	n.keyCacheMu.RUnlock()
-
+	// [SAFETY] Always check CRL first, even if cached
 	if n.crl().IsRevoked(did) {
 		return nil, fmt.Errorf("الهوية ملغاة: %s", did)
 	}
+
+	n.keyCacheMu.RLock()
+	if pub, ok := n.keyCache()[did]; ok {
+		n.keyCacheMu.RUnlock()
+		// [SAFETY] Even with cache hit, verify from DHT to ensure revocation is checked
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		val, err := n.dht().GetValue(ctx, "/mskt/identity/"+did)
+		if err != nil {
+			// [FALLBACK] If DHT check fails, return cached key but log warning
+			n.log.Warnf("DHT check failed for %s, using cached key: %v", did, err)
+			return pub, nil
+		}
+
+		var rec identity.IdentityRecord
+		if err := json.Unmarshal(val, &rec); err != nil {
+			n.log.Warnf("Failed to unmarshal identity record for %s, using cached key: %v", did, err)
+			return pub, nil
+		}
+
+		if err := rec.Verify(); err != nil {
+			return nil, fmt.Errorf("cached key verification failed: %w", err)
+		}
+
+		cachedPub, err := rec.PublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract public key from DHT record: %w", err)
+		}
+
+		// Verify cached key matches DHT key
+		if !bytes.Equal(pub, cachedPub) {
+			return nil, fmt.Errorf("cached key does not match DHT key for %s", did)
+		}
+
+		return pub, nil
+	}
+	n.keyCacheMu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

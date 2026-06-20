@@ -2,8 +2,10 @@ package agent_bridge
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/MortalArena/Musketeers/pkg/agent_bridge/protocol"
@@ -23,6 +25,11 @@ type Server struct {
 	running        bool
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
+	// [SAFETY] TLS configuration
+	tlsConfig *tls.Config
+	certFile  string
+	keyFile   string
+	useTLS    bool
 }
 
 // NewServer ينشئ خادم جسر جديد
@@ -36,6 +43,33 @@ func NewServer(n *node.Node, addr string, sessionMgr *SessionManager, multiplexe
 	}
 }
 
+// [SAFETY] SetTLSConfig sets TLS configuration for the server
+func (s *Server) SetTLSConfig(certFile, keyFile string) error {
+	// Check if certificate files exist
+	if _, err := os.Stat(certFile); os.IsNotExist(err) {
+		return fmt.Errorf("certificate file not found: %s", certFile)
+	}
+	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
+		return fmt.Errorf("key file not found: %s", keyFile)
+	}
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return fmt.Errorf("failed to load TLS certificate: %w", err)
+	}
+
+	s.tlsConfig = &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+	s.certFile = certFile
+	s.keyFile = keyFile
+	s.useTLS = true
+
+	s.log.WithField("cert_file", certFile).WithField("key_file", keyFile).Info("TLS configuration loaded")
+	return nil
+}
+
 // Start يبدأ الخادم
 func (s *Server) Start(ctx context.Context) error {
 	s.mu.Lock()
@@ -47,13 +81,24 @@ func (s *Server) Start(ctx context.Context) error {
 	s.shutdownCtx, s.shutdownCancel = context.WithCancel(ctx)
 	s.mu.Unlock()
 
-	listener, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", s.addr, err)
+	var listener net.Listener
+	var err error
+
+	// [SAFETY] Use TLS if configured
+	if s.useTLS && s.tlsConfig != nil {
+		listener, err = tls.Listen("tcp", s.addr, s.tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s with TLS: %w", s.addr, err)
+		}
+		s.log.WithField("addr", s.addr).Info("Agent Bridge Server started with TLS")
+	} else {
+		listener, err = net.Listen("tcp", s.addr)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s: %w", s.addr, err)
+		}
+		s.log.WithField("addr", s.addr).Warn("Agent Bridge Server started without TLS (not recommended for production)")
 	}
 	s.listener = listener
-
-	s.log.WithField("addr", s.addr).Info("Agent Bridge Server started")
 
 	go s.acceptConnections()
 

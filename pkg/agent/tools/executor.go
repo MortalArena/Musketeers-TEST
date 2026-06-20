@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,18 +133,21 @@ func (te *ToolExecutor) incrementToolCallCount(taskID string) {
 // [HOW] يفحص المسار النسبي ويمنع ../
 // [SAFETY] يمنع الوصول خارج المسار المسموح
 func (te *ToolExecutor) isPathAllowed(path string) bool {
+	// [SAFETY] تنظيف المسار أولاً لمنع URL encoding و backslashes
+	cleanPath := filepath.Clean(path)
+
 	// [SAFETY] منع المسارات المطلقة
-	if filepath.IsAbs(path) {
+	if filepath.IsAbs(cleanPath) {
 		return false
 	}
 
 	// [SAFETY] منع ../ للوصول خارج المسار المسموح
-	if strings.Contains(path, "..") {
+	if strings.Contains(cleanPath, "..") {
 		return false
 	}
 
 	// [HOW] تحويل المسار إلى مسار مطلق
-	absPath, err := filepath.Abs(filepath.Join(te.AllowedBasePath, path))
+	absPath, err := filepath.Abs(filepath.Join(te.AllowedBasePath, cleanPath))
 	if err != nil {
 		return false
 	}
@@ -154,7 +159,8 @@ func (te *ToolExecutor) isPathAllowed(path string) bool {
 	}
 
 	// [SAFETY] التأكد من أن المسار داخل المسار المسموح
-	return strings.HasPrefix(absPath, allowedAbsPath)
+	// [FIX] استخدام filepath.HasPrefix بدلاً من strings.HasPrefix للتعامل مع path separators بشكل صحيح
+	return strings.HasPrefix(absPath, allowedAbsPath+string(filepath.Separator))
 }
 
 // [WHY] checkFileSize يفحص حجم الملف
@@ -312,6 +318,44 @@ func (te *ToolExecutor) writeFileWithContext(ctx context.Context, path string, d
 	return nil
 }
 
+// [WHY] isPrivateURL يفحص ما إذا كان URL عنواناً داخلياً
+// [HOW] يمنع HTTP والعناوين الداخلية (localhost, 127.0.0.1, 192.168.x.x, 10.x.x.x, 172.16.x.x, 169.254.x.x)
+// [SAFETY] يمنع SSRF (Server-Side Request Forgery)
+func isPrivateURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return true
+	}
+
+	// [SAFETY] منع HTTP (فقط HTTPS)
+	if parsed.Scheme != "https" {
+		return true
+	}
+
+	host := parsed.Hostname()
+
+	// [SAFETY] منع localhost والعناوين الداخلية
+	blocked := []string{
+		"localhost", "127.", "10.", "192.168.", "172.16.",
+		"169.254.", "::1", "[::1]", "0.0.0.0",
+	}
+	for _, b := range blocked {
+		if strings.HasPrefix(host, b) {
+			return true
+		}
+	}
+
+	// [SAFETY] فحص IP address
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+			return true
+		}
+	}
+
+	return false
+}
+
 // [WHY] httpRequest يرسل طلب HTTP
 // [HOW] يرسل طلب HTTP مع context للإلغاء
 // [SAFETY] يلغاء الطلب إذا تم إلغاء context
@@ -319,6 +363,11 @@ func (te *ToolExecutor) httpRequest(ctx context.Context, params map[string]inter
 	url, ok := params["url"].(string)
 	if !ok {
 		return nil, fmt.Errorf("المعامل url مطلوب")
+	}
+
+	// [SAFETY] فحص SSRF
+	if isPrivateURL(url) {
+		return nil, fmt.Errorf("SSRF: private/internal URLs not allowed: %s", url)
 	}
 
 	method, _ := params["method"].(string)

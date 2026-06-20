@@ -89,11 +89,18 @@ func (p *Provider) Close() error {
 	return nil
 }
 
+// setHeaders sets the required headers for Google API requests
+func (p *Provider) setHeaders(req *http.Request) {
+	req.Header.Set("X-Goog-Api-Key", p.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+}
+
 func (p *Provider) Ping(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/models?key="+p.apiKey, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/models", nil)
 	if err != nil {
 		return err
 	}
+	p.setHeaders(req)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -136,12 +143,11 @@ func (p *Provider) Complete(ctx context.Context, req *providers.CompletionReques
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/models/"+req.Model+":generateContent?key="+p.apiKey, bytes.NewReader(jsonBody))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/models/"+req.Model+":generateContent", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
+	p.setHeaders(httpReq)
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
@@ -202,12 +208,11 @@ func (p *Provider) StreamComplete(ctx context.Context, req *providers.Completion
 		return err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/models/"+req.Model+":streamGenerateContent?key="+p.apiKey, bytes.NewReader(jsonBody))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/models/"+req.Model+":streamGenerateContent", bytes.NewReader(jsonBody))
 	if err != nil {
 		return err
 	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
+	p.setHeaders(httpReq)
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
@@ -259,10 +264,11 @@ func (p *Provider) StreamComplete(ctx context.Context, req *providers.Completion
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/models?key="+p.apiKey, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/models", nil)
 	if err != nil {
 		return nil, err
 	}
+	p.setHeaders(req)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {

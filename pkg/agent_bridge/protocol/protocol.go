@@ -8,15 +8,18 @@ import (
 	"net"
 )
 
+// MaxMessageSize الحد الأقصى لحجم الرسالة (10MB)
+const MaxMessageSize = 10 * 1024 * 1024
+
 // MessageType نوع الرسالة
 type MessageType string
 
 const (
-	MessageTypeTaskRequest    MessageType = "task_request"
-	MessageTypeTaskResponse   MessageType = "task_response"
-	MessageTypeHeartbeat       MessageType = "heartbeat"
-	MessageTypeHeartbeatAck    MessageType = "heartbeat_ack"
-	MessageTypeError           MessageType = "error"
+	MessageTypeTaskRequest  MessageType = "task_request"
+	MessageTypeTaskResponse MessageType = "task_response"
+	MessageTypeHeartbeat    MessageType = "heartbeat"
+	MessageTypeHeartbeatAck MessageType = "heartbeat_ack"
+	MessageTypeError        MessageType = "error"
 )
 
 // Message رسالة بروتوكول
@@ -61,6 +64,11 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 	var length uint32
 	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
 		return nil, fmt.Errorf("failed to read message length: %w", err)
+	}
+
+	// فحص الحد الأقصى لحجم الرسالة
+	if length == 0 || length > MaxMessageSize {
+		return nil, fmt.Errorf("invalid message length: %d (max: %d)", length, MaxMessageSize)
 	}
 
 	// قراءة الرسالة

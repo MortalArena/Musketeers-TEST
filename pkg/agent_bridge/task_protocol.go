@@ -12,12 +12,12 @@ import (
 
 // TaskRequest طلب مهمة من Studio إلى Agent
 type TaskRequest struct {
-	TaskID      string                 `json:"task_id"`
-	Type        string                 `json:"type"`        // "execute", "query", "file_upload", "file_download"
-	Payload     map[string]interface{} `json:"payload"`
-	Priority    int                    `json:"priority"`    // 0=low, 1=normal, 2=high, 3=emergency
-	CreatedAt   time.Time              `json:"created_at"`
-	TimeoutSec  int                    `json:"timeout_sec"` // مهلة التنفيذ بالثواني
+	TaskID     string                 `json:"task_id"`
+	Type       string                 `json:"type"` // "execute", "query", "file_upload", "file_download"
+	Payload    map[string]interface{} `json:"payload"`
+	Priority   int                    `json:"priority"` // 0=low, 1=normal, 2=high, 3=emergency
+	CreatedAt  time.Time              `json:"created_at"`
+	TimeoutSec int                    `json:"timeout_sec"` // مهلة التنفيذ بالثواني
 }
 
 // TaskResponse استجابة مهمة من Agent إلى Studio
@@ -150,9 +150,12 @@ func generateTaskID() (string, error) {
 	return "task_" + hex.EncodeToString(b), nil
 }
 
-// generateSessionID يولد معرف جلسة فريد
+// [SAFETY] generateSessionID يولد معرف جلسة فريد بشكل آمن
 func generateSessionID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// [FALLBACK] If crypto/rand fails, use timestamp (less secure but better than panic)
+		return "session_" + fmt.Sprintf("%x", time.Now().UnixNano())
+	}
 	return "session_" + hex.EncodeToString(b)
 }

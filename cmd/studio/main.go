@@ -22,6 +22,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/identity"
 	"github.com/MortalArena/Musketeers/pkg/node"
 	pkgOrchestrator "github.com/MortalArena/Musketeers/pkg/orchestrator"
+	pkgPolicy "github.com/MortalArena/Musketeers/pkg/policy"
 	pkgSession "github.com/MortalArena/Musketeers/pkg/session"
 	"github.com/MortalArena/Musketeers/pkg/storage"
 	pkgVerification "github.com/MortalArena/Musketeers/pkg/verification"
@@ -250,8 +251,24 @@ func main() {
 
 	// إنشاء ExternalPlatformManager لإدارة المنصات الخارجية
 	// ملاحظة: ExternalPlatformManager يتطلب capability.Manager
-	// ننشئ Capability Manager مع policy.Engine فارغ
-	capabilityManager := pkgCapability.NewManager(nil)
+	// [SAFETY] إنشاء policy.Engine حقيقي بدلاً من nil
+	policyEngine := pkgPolicy.NewEngine()
+	// إضافة قاعدة افتراضية للسماح بالعمليات الأساسية
+	defaultRule := pkgPolicy.Rule{
+		Name:     "default-deny",
+		Priority: 0,
+		Effect:   pkgPolicy.EffectDeny,
+		Principals: []pkgPolicy.Principal{
+			{DID: "*"},
+		},
+		Resources: []pkgPolicy.Resource{
+			{Type: "*", Action: "*"},
+		},
+	}
+	if err := policyEngine.AddRule(defaultRule); err != nil {
+		log.WithError(err).Warn("Failed to add default policy rule")
+	}
+	capabilityManager := pkgCapability.NewManager(policyEngine)
 	platformManager := pkgOrchestrator.NewExternalPlatformManager(eb, capabilityManager, zapLogger)
 	if err := platformManager.Start(); err != nil {
 		log.WithError(err).Fatal("Failed to start external platform manager")

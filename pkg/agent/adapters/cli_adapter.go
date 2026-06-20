@@ -11,13 +11,36 @@ import (
 	"go.uber.org/zap"
 )
 
+// AllowedCommands whitelist للأوامر المسموحة
+var AllowedCommands = map[string]bool{
+	"echo":     true,
+	"ls":       true,
+	"cat":      true,
+	"grep":     true,
+	"find":     true,
+	"wc":       true,
+	"head":     true,
+	"tail":     true,
+	"sort":     true,
+	"uniq":     true,
+	"cut":      true,
+	"awk":      true,
+	"sed":      true,
+	"tr":       true,
+	"date":     true,
+	"whoami":   true,
+	"pwd":      true,
+	"basename": true,
+	"dirname":  true,
+}
+
 // CLIAdapter محول لـ CLI (سطر الأوامر)
 type CLIAdapter struct {
-	info       *agent.AgentInfo
-	command    string
-	args       []string
-	logger     *zap.Logger
-	available  bool
+	info      *agent.AgentInfo
+	command   string
+	args      []string
+	logger    *zap.Logger
+	available bool
 }
 
 // CLIConfig إعدادات CLI
@@ -64,6 +87,23 @@ func (ca *CLIAdapter) GetInfo() *agent.AgentInfo {
 func (ca *CLIAdapter) SendMessage(ctx context.Context, prompt string) (*agent.AgentResponse, error) {
 	startTime := time.Now()
 
+	// [SAFETY] فحص whitelist للأوامر المسموحة
+	if !AllowedCommands[ca.command] {
+		return nil, fmt.Errorf("command not allowed: %s (allowed: echo, ls, cat, grep, find, wc, head, tail, sort, uniq, cut, awk, sed, tr, date, whoami, pwd, basename, dirname)", ca.command)
+	}
+
+	// [SAFETY] فحص args لمنع command injection
+	for _, arg := range ca.args {
+		if strings.ContainsAny(arg, ";|&$`") {
+			return nil, fmt.Errorf("invalid characters in args: %s (contains shell metacharacters)", arg)
+		}
+	}
+
+	// [SAFETY] فحص prompt لمنع command injection
+	if strings.ContainsAny(prompt, ";|&$`") {
+		return nil, fmt.Errorf("invalid characters in prompt: contains shell metacharacters")
+	}
+
 	// تجهيز الأوامر
 	args := append(ca.args, prompt)
 
@@ -103,8 +143,8 @@ func (ca *CLIAdapter) ExecuteTask(ctx context.Context, task *agent.AgentTask) (*
 	response, err := ca.SendMessage(ctx, prompt)
 	if err != nil {
 		return &agent.TaskExecutionResult{
-			Success: false,
-			Error:   err.Error(),
+			Success:  false,
+			Error:    err.Error(),
 			Duration: time.Since(startTime),
 		}, nil
 	}

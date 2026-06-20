@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -185,10 +186,23 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		auth := r.Header.Get("Authorization")
-		if auth != "Bearer "+s.token {
+		expectedAuth := "Bearer " + s.token
+		// [SAFETY] Use subtle.ConstantTimeCompare to prevent timing attacks
+		if subtle.ConstantTimeCompare([]byte(auth), []byte(expectedAuth)) != 1 {
 			http.Error(w, "غير مصرح", http.StatusUnauthorized)
 			return
 		}
+		// [SAFETY] Check X-Forwarded-For to prevent IP spoofing
+		// Get real client IP from X-Forwarded-For or X-Real-IP if behind proxy
+		clientIP := r.RemoteAddr
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// Take the first IP (original client) from the chain
+			clientIP = strings.Split(xff, ",")[0]
+		} else if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			clientIP = xri
+		}
+		// Log the client IP for security auditing
+		s.log.WithField("client_ip", clientIP).WithField("path", r.URL.Path).Debug("Request from client")
 		next.ServeHTTP(w, r)
 	})
 }

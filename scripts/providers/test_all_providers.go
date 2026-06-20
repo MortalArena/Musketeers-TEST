@@ -1,4 +1,4 @@
-package main
+package providers
 
 import (
 	"context"
@@ -56,7 +56,7 @@ func testProvider(provider ProviderTest) (bool, int, string) {
 	return false, 0, "failed to connect"
 }
 
-func main() {
+func TestAllProviders() {
 	cloudProviders := []ProviderTest{
 		{Name: "OpenAI", BaseURL: "https://api.openai.com/v1", Type: "cloud"},
 		{Name: "Anthropic", BaseURL: "https://api.anthropic.com/v1", Type: "cloud"},
@@ -162,12 +162,12 @@ func main() {
 	fmt.Println("RECOMMENDATIONS")
 	fmt.Println("================================================================================")
 	fmt.Println()
-	
+
 	if cloudSuccessCount < len(cloudProviders) {
 		fmt.Println("⚠️  Some cloud providers failed to connect. Check their API URLs.")
 		fmt.Println()
 	}
-	
+
 	if localSuccessCount == 0 {
 		fmt.Println("⚠️  No local providers are running.")
 		fmt.Println()

@@ -11,25 +11,26 @@ import (
 	"os"
 	"path/filepath"
 
-	"golang.org/x/crypto/scrypt"
+	"golang.org/x/crypto/argon2"
 )
 
 const (
 	keystoreVersion = 1
-	scryptN         = 1 << 17 // 131072
-	scryptR         = 8
-	scryptP         = 1
-	scryptKeyLen    = 32
-	saltLen         = 32
+	// [SAFETY] Argon2id parameters (RFC 9106 recommended)
+	argon2Time    = 3
+	argon2Memory  = 64 * 1024 // 64 MB
+	argon2Threads = 4
+	argon2KeyLen  = 32
+	saltLen       = 32
 )
 
 // KeystoreFile تنسيق ملف المفتاح المشفّر
 type KeystoreFile struct {
 	Version    int    `json:"version"`
 	DID        string `json:"did"`
-	Salt       string `json:"salt"`       // hex
-	Nonce      string `json:"nonce"`      // hex — AES-GCM nonce
-	Ciphertext string `json:"ciphertext"` // hex — مفتاح خاص مشفّر
+	Salt       string `json:"salt"`               // hex
+	Nonce      string `json:"nonce"`              // hex — AES-GCM nonce
+	Ciphertext string `json:"ciphertext"`         // hex — مفتاح خاص مشفّر
 	Mnemonic   string `json:"mnemonic,omitempty"` // مشفّر داخل ciphertext إن وُجد
 }
 
@@ -56,10 +57,8 @@ func SaveKeystore(path, passphrase string, kp *KeyPair, mnemonic string) error {
 	}
 
 	passphrase = NormalizePassphrase(passphrase)
-	derived, err := scrypt.Key([]byte(passphrase), salt, scryptN, scryptR, scryptP, scryptKeyLen)
-	if err != nil {
-		return fmt.Errorf("فشل scrypt: %w", err)
-	}
+	// [SAFETY] Use argon2id instead of scrypt for better security
+	derived := argon2.IDKey([]byte(passphrase), salt, argon2Time, argon2Memory, argon2Threads, argon2KeyLen)
 
 	block, err := aes.NewCipher(derived)
 	if err != nil {
@@ -124,10 +123,8 @@ func LoadKeystore(path, passphrase string) (*KeyPair, string, error) {
 	}
 
 	passphrase = NormalizePassphrase(passphrase)
-	derived, err := scrypt.Key([]byte(passphrase), salt, scryptN, scryptR, scryptP, scryptKeyLen)
-	if err != nil {
-		return nil, "", err
-	}
+	// [SAFETY] Use argon2id instead of scrypt for better security
+	derived := argon2.IDKey([]byte(passphrase), salt, argon2Time, argon2Memory, argon2Threads, argon2KeyLen)
 
 	block, err := aes.NewCipher(derived)
 	if err != nil {

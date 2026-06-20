@@ -51,3 +51,42 @@ func TestKeystoreRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// [SAFETY] Test argon2id key derivation (using public API)
+func TestArgon2idKeyDerivation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "identity-argon2.key")
+
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mnemonic, _ := GenerateMnemonic()
+
+	// Test encryption with argon2id (via SaveKeystore)
+	if err := SaveKeystore(path, "test-passphrase", kp, mnemonic); err != nil {
+		t.Fatalf("SaveKeystore failed: %v", err)
+	}
+
+	// Test decryption with correct passphrase (via LoadKeystore)
+	loaded, loadedMnemonic, err := LoadKeystore(path, "test-passphrase")
+	if err != nil {
+		t.Fatalf("LoadKeystore failed: %v", err)
+	}
+
+	if loaded.DID != kp.DID {
+		t.Fatal("DID mismatch after decryption")
+	}
+	if string(loaded.Private) != string(kp.Private) {
+		t.Fatal("private key mismatch after decryption")
+	}
+	if loadedMnemonic != mnemonic {
+		t.Fatal("mnemonic mismatch after decryption")
+	}
+
+	// Test decryption with wrong passphrase
+	_, _, err = LoadKeystore(path, "wrong-passphrase")
+	if err == nil {
+		t.Fatal("should fail with wrong passphrase")
+	}
+}
