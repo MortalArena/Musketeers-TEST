@@ -6,30 +6,30 @@ import (
 	"time"
 )
 
-// IdentityType نوع الهوية
+// IdentityType identity type
 type IdentityType string
 
 const (
-	IdentityTypeHuman IdentityType = "human" // هوية بشرية
-	IdentityTypeAgent IdentityType = "agent" // هوية وكيل/نموذج AI
+	IdentityTypeHuman IdentityType = "human" // human identity
+	IdentityTypeAgent IdentityType = "agent" // agent/AI model identity
 )
 
-// IdentityLimiter يحد عدد الهويات المسموح بها على العقدة
+// IdentityLimiter limits number of identities allowed on node
 type IdentityLimiter struct {
 	mu              sync.RWMutex
 	humanIdentities map[string]time.Time // nodeID -> last creation time
 	agentIdentities map[string]time.Time // nodeID -> last creation time
 
 	// [SAFETY] Limits per node
-	maxHumanIdentities int // الحد الأقصى للهويات البشرية على العقدة
-	maxAgentIdentities int // الحد الأقصى لهويات الوكلاء على العقدة
+	maxHumanIdentities int // Maximum human identities per node
+	maxAgentIdentities int // Maximum agent identities per node
 
 	// [SAFETY] Rate limiting
-	humanCooldown time.Duration // الفترة الزمنية بين إنشاء هويات بشرية
-	agentCooldown time.Duration // الفترة الزمنية بين إنشاء هويات الوكلاء
+	humanCooldown time.Duration // Time between human identity creation
+	agentCooldown time.Duration // Time between agent identity creation
 }
 
-// NewIdentityLimiter ينشئ محدد هويات جديد
+// NewIdentityLimiter creates new identity limiter
 func NewIdentityLimiter() *IdentityLimiter {
 	return &IdentityLimiter{
 		humanIdentities: make(map[string]time.Time),
@@ -50,7 +50,7 @@ func NewIdentityLimiter() *IdentityLimiter {
 	}
 }
 
-// CanCreateIdentity يتحقق من إمكانية إنشاء هوية جديدة
+// CanCreateIdentity checks if new identity can be created
 func (il *IdentityLimiter) CanCreateIdentity(nodeID string, identityType IdentityType) error {
 	il.mu.Lock()
 	defer il.mu.Unlock()
@@ -67,7 +67,7 @@ func (il *IdentityLimiter) CanCreateIdentity(nodeID string, identityType Identit
 	}
 }
 
-// canCreateHumanIdentity يتحقق من إمكانية إنشاء هوية بشرية
+// canCreateHumanIdentity checks if human identity can be created
 func (il *IdentityLimiter) canCreateHumanIdentity(nodeID string, now time.Time) error {
 	// [SAFETY] Check count limit (identities persist indefinitely - no cleanup)
 	count := len(il.humanIdentities)
@@ -86,7 +86,7 @@ func (il *IdentityLimiter) canCreateHumanIdentity(nodeID string, now time.Time) 
 	return nil
 }
 
-// canCreateAgentIdentity يتحقق من إمكانية إنشاء هوية وكيل
+// canCreateAgentIdentity checks if agent identity can be created
 func (il *IdentityLimiter) canCreateAgentIdentity(nodeID string, now time.Time) error {
 	// [SAFETY] Check count limit (identities persist indefinitely - no cleanup)
 	count := len(il.agentIdentities)
@@ -105,7 +105,7 @@ func (il *IdentityLimiter) canCreateAgentIdentity(nodeID string, now time.Time) 
 	return nil
 }
 
-// RecordIdentityCreation يسجل إنشاء هوية جديدة
+// RecordIdentityCreation records new identity creation
 func (il *IdentityLimiter) RecordIdentityCreation(nodeID string, identityType IdentityType) {
 	il.mu.Lock()
 	defer il.mu.Unlock()
@@ -120,7 +120,7 @@ func (il *IdentityLimiter) RecordIdentityCreation(nodeID string, identityType Id
 	}
 }
 
-// GetIdentityCount يحصل على عدد الهويات الحالية
+// GetIdentityCount gets current identity count
 func (il *IdentityLimiter) GetIdentityCount(identityType IdentityType) int {
 	il.mu.RLock()
 	defer il.mu.RUnlock()
@@ -135,14 +135,14 @@ func (il *IdentityLimiter) GetIdentityCount(identityType IdentityType) int {
 	return 0
 }
 
-// GetLimits يحصل على الحدود الحالية
+// GetLimits gets current limits
 func (il *IdentityLimiter) GetLimits() (maxHuman, maxAgent int) {
 	il.mu.RLock()
 	defer il.mu.RUnlock()
 	return il.maxHumanIdentities, il.maxAgentIdentities
 }
 
-// SetLimits يحد الحدود (للاستخدام في الاختبارات أو التكوين الخاص)
+// SetLimits sets limits (for use in tests or custom configuration)
 func (il *IdentityLimiter) SetLimits(maxHuman, maxAgent int) {
 	il.mu.Lock()
 	defer il.mu.Unlock()
@@ -150,7 +150,7 @@ func (il *IdentityLimiter) SetLimits(maxHuman, maxAgent int) {
 	il.maxAgentIdentities = maxAgent
 }
 
-// Clear يمسح جميع السجلات
+// Clear clears all records
 func (il *IdentityLimiter) Clear() {
 	il.mu.Lock()
 	defer il.mu.Unlock()

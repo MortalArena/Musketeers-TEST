@@ -24,23 +24,23 @@ const (
 	saltLen       = 32
 )
 
-// KeystoreFile تنسيق ملف المفتاح المشفّر
+// KeystoreFile encrypted key file format
 type KeystoreFile struct {
 	Version    int    `json:"version"`
 	DID        string `json:"did"`
 	Salt       string `json:"salt"`               // hex
 	Nonce      string `json:"nonce"`              // hex — AES-GCM nonce
-	Ciphertext string `json:"ciphertext"`         // hex — مفتاح خاص مشفّر
-	Mnemonic   string `json:"mnemonic,omitempty"` // مشفّر داخل ciphertext إن وُجد
+	Ciphertext string `json:"ciphertext"`         // hex — encrypted private key
+	Mnemonic   string `json:"mnemonic,omitempty"` // encrypted inside ciphertext if present
 }
 
-// keystorePlaintext البيانات قبل التشفير
+// keystorePlaintext data before encryption
 type keystorePlaintext struct {
 	PrivateKey string `json:"private_key"` // hex
 	Mnemonic   string `json:"mnemonic,omitempty"`
 }
 
-// SaveKeystore يحفظ المفتاح الخاص مشفّراً على القرص
+// SaveKeystore saves private key encrypted to disk
 func SaveKeystore(path, passphrase string, kp *KeyPair, mnemonic string) error {
 	plain := keystorePlaintext{
 		PrivateKey: hex.EncodeToString(kp.Private),
@@ -94,11 +94,11 @@ func SaveKeystore(path, passphrase string, kp *KeyPair, mnemonic string) error {
 	return os.WriteFile(path, data, 0600)
 }
 
-// LoadKeystore يحمّل المفتاح الخاص من ملف مشفّر
+// LoadKeystore loads private key from encrypted file
 func LoadKeystore(path, passphrase string) (*KeyPair, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("فشل قراءة keystore: %w", err)
+		return nil, "", fmt.Errorf("failed to read keystore: %w", err)
 	}
 
 	var ks KeystoreFile
@@ -106,7 +106,7 @@ func LoadKeystore(path, passphrase string) (*KeyPair, string, error) {
 		return nil, "", err
 	}
 	if ks.Version != keystoreVersion {
-		return nil, "", fmt.Errorf("إصدار keystore غير مدعوم: %d", ks.Version)
+		return nil, "", fmt.Errorf("unsupported keystore version: %d", ks.Version)
 	}
 
 	salt, err := hex.DecodeString(ks.Salt)
@@ -137,7 +137,7 @@ func LoadKeystore(path, passphrase string) (*KeyPair, string, error) {
 
 	plainJSON, err := gcm.Open(nil, nonce, ciphertext, []byte("Musketeers-keystore-v1"))
 	if err != nil {
-		return nil, "", fmt.Errorf("عبارة مرور خاطئة أو ملف تالف")
+		return nil, "", fmt.Errorf("incorrect passphrase or corrupted file")
 	}
 
 	var plain keystorePlaintext
@@ -147,22 +147,22 @@ func LoadKeystore(path, passphrase string) (*KeyPair, string, error) {
 
 	privBytes, err := hex.DecodeString(plain.PrivateKey)
 	if err != nil || len(privBytes) != ed25519.PrivateKeySize {
-		return nil, "", fmt.Errorf("مفتاح خاص تالف في keystore")
+		return nil, "", fmt.Errorf("corrupted private key in keystore")
 	}
 
 	kp := KeyPairFromPrivate(ed25519.PrivateKey(privBytes))
 	if ks.DID != "" && kp.DID != ks.DID {
-		return nil, "", fmt.Errorf("DID لا يطابق الملف")
+		return nil, "", fmt.Errorf("DID does not match file")
 	}
 	return kp, plain.Mnemonic, nil
 }
 
-// KeystorePath يبني مسار keystore الافتراضي
+// KeystorePath builds default keystore path
 func KeystorePath(dataDir string) string {
 	return filepath.Join(dataDir, "identity.key")
 }
 
-// KeystoreExists يتحقق من وجود keystore
+// KeystoreExists checks if keystore exists
 func KeystoreExists(dataDir string) bool {
 	_, err := os.Stat(KeystorePath(dataDir))
 	return err == nil

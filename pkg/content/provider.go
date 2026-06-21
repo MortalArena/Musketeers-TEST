@@ -16,7 +16,7 @@ import (
 
 const providerDHTPrefix = "/nr/prov/"
 
-// ProviderManager يدير تسجيل الموفرين في DHT
+// ProviderManager manages provider registration in DHT
 type ProviderManager struct {
 	host  host.Host
 	dht   *dht.IpfsDHT
@@ -24,7 +24,7 @@ type ProviderManager struct {
 	log   *logrus.Entry
 }
 
-// NewProviderManager ينشئ مدير موفرين
+// NewProviderManager creates provider manager
 func NewProviderManager(h host.Host, kad *dht.IpfsDHT, store BlockStore, log *logrus.Logger) *ProviderManager {
 	return &ProviderManager{
 		host:  h,
@@ -34,22 +34,22 @@ func NewProviderManager(h host.Host, kad *dht.IpfsDHT, store BlockStore, log *lo
 	}
 }
 
-// PublishContent يخزّن كتلة ويسجّل نفسه كموفر
+// PublishContent stores block and registers itself as provider
 func (pm *ProviderManager) PublishContent(ctx context.Context, data []byte, did string) (string, error) {
 	cid := CIDFromData(data)
 	if err := pm.store.Put(cid, data, did); err != nil {
-		return "", fmt.Errorf("فشل تخزين الكتلة: %w", err)
+		return "", fmt.Errorf("failed to store block: %w", err)
 	}
 	if err := pm.AddProvider(ctx, cid); err != nil {
-		// العقدة المعزولة قد لا تجد peers في جدول التوجيه — التخزين المحلي كافٍ
-		pm.log.WithError(err).Warn("تسجيل الموفر على DHT فشل — المحتوى مخزّن محلياً")
+		// Isolated node may not find peers in routing table — local storage is sufficient
+		pm.log.WithError(err).Warn("provider registration on DHT failed — content stored locally")
 	} else {
-		pm.log.WithField("cid", cid).Info("تم نشر المحتوى")
+		pm.log.WithField("cid", cid).Info("content published")
 	}
 	return cid, nil
 }
 
-// AddProvider يسجّل العقدة الحالية كموفّر لـ CID
+// AddProvider registers current node as provider for CID
 func (pm *ProviderManager) AddProvider(ctx context.Context, cid string) error {
 	key := providerDHTPrefix + cid
 	rec := protocol.ProviderRecord{
@@ -63,7 +63,7 @@ func (pm *ProviderManager) AddProvider(ctx context.Context, cid string) error {
 	return pm.dht.PutValue(ctx, key, data)
 }
 
-// FindProviders يبحث عن موفري CID في DHT
+// FindProviders searches for CID providers in DHT
 func (pm *ProviderManager) FindProviders(ctx context.Context, cid string) ([]peer.ID, error) {
 	key := providerDHTPrefix + cid
 	val, err := pm.dht.GetValue(ctx, key)
@@ -85,7 +85,7 @@ func (pm *ProviderManager) FindProviders(ctx context.Context, cid string) ([]pee
 	return peers, nil
 }
 
-// ServeBitswap يستقبل طلبات Bitswap
+// ServeBitswap receives Bitswap requests
 func (pm *ProviderManager) ServeBitswap(s network.Stream) {
 	defer s.Close()
 	buf := make([]byte, 128)
@@ -93,7 +93,7 @@ func (pm *ProviderManager) ServeBitswap(s network.Stream) {
 	if err != nil || n == 0 {
 		return
 	}
-	// الطلب: CID\n
+	// Request: CID\n
 	cid := string(buf[:n])
 	if len(cid) > 0 && cid[len(cid)-1] == '\n' {
 		cid = cid[:len(cid)-1]
@@ -101,11 +101,11 @@ func (pm *ProviderManager) ServeBitswap(s network.Stream) {
 
 	data, err := pm.store.Get(cid)
 	if err != nil {
-		pm.log.WithField("cid", cid).Debug("كتلة غير موجودة محلياً")
+		pm.log.WithField("cid", cid).Debug("block not found locally")
 		return
 	}
 
-	// الاستجابة: 4 bytes length (big endian) + data
+	// Response: 4 bytes length (big endian) + data
 	length := make([]byte, 4)
 	length[0] = byte(len(data) >> 24)
 	length[1] = byte(len(data) >> 16)
@@ -119,14 +119,14 @@ func (pm *ProviderManager) ServeBitswap(s network.Stream) {
 	}
 }
 
-// RequestBlock يطلب كتلة من نظير عبر Bitswap
+// RequestBlock requests block from peer via Bitswap
 func RequestBlock(ctx context.Context, h host.Host, pid peer.ID, cid string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	s, err := h.NewStream(ctx, pid, protocol.ProtocolBitswap)
 	if err != nil {
-		return nil, fmt.Errorf("فشل فتح stream: %w", err)
+		return nil, fmt.Errorf("failed to open stream: %w", err)
 	}
 	defer s.Close()
 
@@ -137,11 +137,11 @@ func RequestBlock(ctx context.Context, h host.Host, pid peer.ID, cid string) ([]
 
 	lengthBuf := make([]byte, 4)
 	if _, err := s.Read(lengthBuf); err != nil {
-		return nil, fmt.Errorf("فشل قراءة الطول: %w", err)
+		return nil, fmt.Errorf("failed to read length: %w", err)
 	}
 	length := int(lengthBuf[0])<<24 | int(lengthBuf[1])<<16 | int(lengthBuf[2])<<8 | int(lengthBuf[3])
 	if length > protocol.MaxBlockSize || length <= 0 {
-		return nil, fmt.Errorf("حجم كتلة غير صالح: %d", length)
+		return nil, fmt.Errorf("invalid block size: %d", length)
 	}
 
 	data := make([]byte, length)
@@ -155,7 +155,7 @@ func RequestBlock(ctx context.Context, h host.Host, pid peer.ID, cid string) ([]
 	}
 
 	if err := VerifyCID(cid, data); err != nil {
-		return nil, fmt.Errorf("تحقق CID فشل: %w", err)
+		return nil, fmt.Errorf("CID verification failed: %w", err)
 	}
 	return data, nil
 }

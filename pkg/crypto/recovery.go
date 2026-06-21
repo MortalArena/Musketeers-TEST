@@ -7,11 +7,11 @@ import (
 )
 
 const (
-	TotalShares    = 3 // العدد الكلي للأجزاء
-	RequiredShares = 2 // العدد المطلوب لإعادة البناء
+	TotalShares    = 3 // Total number of shares
+	RequiredShares = 2 // Number required for reconstruction
 )
 
-// SplitMasterKey يقسم المفتاح الرئيسي إلى أجزاء مشفرة
+// SplitMasterKey splits master key into encrypted shares
 func SplitMasterKey(masterKey []byte) ([][]byte, error) {
 	if len(masterKey) == 0 {
 		return nil, fmt.Errorf("master key cannot be empty")
@@ -25,7 +25,7 @@ func SplitMasterKey(masterKey []byte) ([][]byte, error) {
 	return shares, nil
 }
 
-// ReconstructMasterKey يعيد بناء المفتاح الرئيسي من الأجزاء المتاحة
+// ReconstructMasterKey reconstructs master key from available shares
 func ReconstructMasterKey(shares [][]byte) ([]byte, error) {
 	if len(shares) < RequiredShares {
 		return nil, fmt.Errorf("insufficient shares: need at least %d, got %d", RequiredShares, len(shares))

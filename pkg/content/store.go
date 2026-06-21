@@ -11,7 +11,7 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
-// BlockStore واجهة تخزين الكتل
+// BlockStore block storage interface
 type BlockStore interface {
 	Get(cid string) ([]byte, error)
 	Put(cid string, data []byte, did string) error
@@ -19,13 +19,13 @@ type BlockStore interface {
 	ListKeys(prefix string) ([]string, error) // New method for mailbox support
 }
 
-// CIDFromData يحسب CID = hex(sha256(data))
+// CIDFromData calculates CID = hex(sha256(data))
 func CIDFromData(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
 }
 
-// VerifyCID يتحقق أن البيانات تطابق CID
+// VerifyCID verifies that data matches CID
 func VerifyCID(cid string, data []byte) error {
 	computed := CIDFromData(data)
 	if computed != cid {
@@ -34,16 +34,16 @@ func VerifyCID(cid string, data []byte) error {
 	return nil
 }
 
-// BadgerBlockStore تطبيق BlockStore باستخدام BadgerDB
+// BadgerBlockStore BlockStore implementation using BadgerDB
 type BadgerBlockStore struct {
 	db       *badger.DB
 	mu       sync.RWMutex
 	size     int64
-	quotaMgr *storage.QuotaManager // ✅ ربط بـ QuotaManager الموحد
+	quotaMgr *storage.QuotaManager // Connected to unified QuotaManager
 	prefix   []byte
 }
 
-// NewBadgerBlockStore ينشئ مخزن كتل
+// NewBadgerBlockStore creates a block store
 func NewBadgerBlockStore(db *badger.DB, qm *storage.QuotaManager) *BadgerBlockStore {
 	return &BadgerBlockStore{
 		db:       db,
@@ -59,7 +59,7 @@ func (s *BadgerBlockStore) blockKey(cid string) []byte {
 	return key
 }
 
-// Get يجلب كتلة بالـ CID
+// Get retrieves a block by CID
 func (s *BadgerBlockStore) Get(cid string) ([]byte, error) {
 	var data []byte
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -73,21 +73,21 @@ func (s *BadgerBlockStore) Get(cid string) ([]byte, error) {
 		})
 	})
 	if err != nil {
-		return nil, fmt.Errorf("كتلة غير موجودة: %s", cid)
+		return nil, fmt.Errorf("block not found: %s", cid)
 	}
 	return data, nil
 }
 
-// Put يخزّن كتلة
+// Put stores a block
 func (s *BadgerBlockStore) Put(cid string, data []byte, did string) error {
 	if len(data) > protocol.MaxBlockSize {
-		return fmt.Errorf("حجم الكتلة يتجاوز الحد (%d)", protocol.MaxBlockSize)
+		return fmt.Errorf("block size exceeds limit (%d)", protocol.MaxBlockSize)
 	}
 	if err := VerifyCID(cid, data); err != nil {
 		return err
 	}
 
-	// ✅ استخدام QuotaManager الموحد للتحقق من الحصة
+	// Use unified QuotaManager for quota check
 	if err := s.quotaMgr.CheckAndAdd(did, int64(len(data))); err != nil {
 		return fmt.Errorf("quota check failed: %w", err)
 	}
@@ -99,7 +99,7 @@ func (s *BadgerBlockStore) Put(cid string, data []byte, did string) error {
 		return txn.Set(s.blockKey(cid), data)
 	})
 	if err != nil {
-		// في حالة الفشل، يجب تحرير المساحة المحجوزة
+		// On failure, release reserved space
 		s.quotaMgr.Release(did, int64(len(data)))
 		return fmt.Errorf("failed to store block: %w", err)
 	}
@@ -107,14 +107,14 @@ func (s *BadgerBlockStore) Put(cid string, data []byte, did string) error {
 	return nil
 }
 
-// Size يرجع الحجم الإجمالي المستخدم
+// Size returns total used size
 func (s *BadgerBlockStore) Size() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.size
 }
 
-// ListKeys يسرد كل المفاتيح مع بادئة معينة
+// ListKeys lists all keys with a given prefix
 func (s *BadgerBlockStore) ListKeys(prefix string) ([]string, error) {
 	var keys []string
 	searchPrefix := s.blockKey(prefix)
@@ -139,15 +139,15 @@ func (s *BadgerBlockStore) ListKeys(prefix string) ([]string, error) {
 	return keys, err
 }
 
-// MemoryBlockStore مخزن في الذاكرة للاختبارات
+// MemoryBlockStore in-memory store for tests
 type MemoryBlockStore struct {
 	mu       sync.RWMutex
 	blocks   map[string][]byte
 	size     int64
-	quotaMgr *storage.QuotaManager // ✅ ربط بـ QuotaManager الموحد
+	quotaMgr *storage.QuotaManager // Connected to unified QuotaManager
 }
 
-// NewMemoryBlockStore ينشئ مخزن ذاكرة
+// NewMemoryBlockStore creates a memory store
 func NewMemoryBlockStore(qm *storage.QuotaManager) *MemoryBlockStore {
 	return &MemoryBlockStore{
 		blocks:   make(map[string][]byte),
@@ -160,20 +160,20 @@ func (s *MemoryBlockStore) Get(cid string) ([]byte, error) {
 	defer s.mu.RUnlock()
 	data, ok := s.blocks[cid]
 	if !ok {
-		return nil, fmt.Errorf("كتلة غير موجودة: %s", cid)
+		return nil, fmt.Errorf("block not found: %s", cid)
 	}
 	return append([]byte(nil), data...), nil
 }
 
 func (s *MemoryBlockStore) Put(cid string, data []byte, did string) error {
 	if len(data) > protocol.MaxBlockSize {
-		return fmt.Errorf("حجم الكتلة يتجاوز الحد")
+		return fmt.Errorf("block size exceeds limit")
 	}
 	if err := VerifyCID(cid, data); err != nil {
 		return err
 	}
 
-	// ✅ استخدام QuotaManager الموحد للتحقق من الحصة
+	// Use unified QuotaManager for quota check
 	if err := s.quotaMgr.CheckAndAdd(did, int64(len(data))); err != nil {
 		return fmt.Errorf("quota check failed: %w", err)
 	}
@@ -191,7 +191,7 @@ func (s *MemoryBlockStore) Size() int64 {
 	return s.size
 }
 
-// ListKeys يسرد كل المفاتيح مع بادئة معينة
+// ListKeys lists all keys with a given prefix
 func (s *MemoryBlockStore) ListKeys(prefix string) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

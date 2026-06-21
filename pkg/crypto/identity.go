@@ -13,24 +13,24 @@ import (
 )
 
 const (
-	// ❌ حذف: DefaultPowDifficulty = 18
-	// ✅ استخدام: DefaultPowDifficulty من pow.go
+	// Removed: DefaultPowDifficulty = 18
+	// Using: DefaultPowDifficulty from pow.go
 
-	DefaultIdentityTTL = 365 * 24 * 3600 // سنة واحدة بالثواني
+	DefaultIdentityTTL = 365 * 24 * 3600 // One year in seconds
 )
 
-// KeyPair زوج مفاتيح Ed25519 مع DID
+// KeyPair Ed25519 key pair with DID
 type KeyPair struct {
 	Private ed25519.PrivateKey
 	Public  ed25519.PublicKey
 	DID     string
 }
 
-// GenerateKeyPair يولّد زوج مفاتيح جديد مع DID
+// GenerateKeyPair generates a new key pair with DID
 func GenerateKeyPair() (*KeyPair, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("فشل توليد المفاتيح: %w", err)
+		return nil, fmt.Errorf("failed to generate keys: %w", err)
 	}
 	return &KeyPair{
 		Private: priv,
@@ -39,7 +39,7 @@ func GenerateKeyPair() (*KeyPair, error) {
 	}, nil
 }
 
-// KeyPairFromPrivate ينشئ KeyPair من مفتاح خاص
+// KeyPairFromPrivate creates KeyPair from private key
 func KeyPairFromPrivate(priv ed25519.PrivateKey) *KeyPair {
 	pub := priv.Public().(ed25519.PublicKey)
 	return &KeyPair{
@@ -49,13 +49,13 @@ func KeyPairFromPrivate(priv ed25519.PrivateKey) *KeyPair {
 	}
 }
 
-// DIDFromPublicKey يحسب DID من المفتاح العام: did:mskt:<base58(sha256(pub)[:16])>
+// DIDFromPublicKey calculates DID from public key: did:mskt:<base58(sha256(pub)[:16])>
 func DIDFromPublicKey(pub ed25519.PublicKey) string {
 	h := sha256.Sum256(pub)
 	return "did:mskt:" + base58.Encode(h[:16])
 }
 
-// PowDifficulty يقرأ صعوبة PoW من البيئة
+// PowDifficulty reads PoW difficulty from environment
 func PowDifficulty() int {
 	if v := os.Getenv("NR_POW_DIFFICULTY"); v != "" {
 		if d, err := strconv.Atoi(v); err == nil && d >= MinPowDifficulty && d <= MaxPowDifficulty {
@@ -65,8 +65,8 @@ func PowDifficulty() int {
 	return DefaultPowDifficulty
 }
 
-// MinePow يعدّن PoW باستخدام scrypt — أول بايت من الناتج == 0x00
-// ✅ استخدام الدالة المحسّنة من pow.go
+// MinePow mines PoW using scrypt — first byte of output == 0x00
+// Using optimized function from pow.go
 func MinePow(ctx context.Context, did string, difficulty int) ([]byte, error) {
 	result, err := MineIdentity(ctx, did, difficulty)
 	if err != nil {
@@ -75,8 +75,8 @@ func MinePow(ctx context.Context, did string, difficulty int) ([]byte, error) {
 	return []byte(result.Nonce), nil
 }
 
-// VerifyPow يتحقق من صحة PoW
-// ✅ استخدام الدالة المحسّنة من pow.go
+// VerifyPow verifies PoW validity
+// Using optimized function from pow.go
 func VerifyPow(did string, nonce []byte, difficulty int) bool {
 	valid, err := VerifyPoW(did, string(nonce), difficulty)
 	if err != nil {
@@ -85,7 +85,7 @@ func VerifyPow(did string, nonce []byte, difficulty int) bool {
 	return valid
 }
 
-// PublicKeyHex يرجع المفتاح العام كـ hex
+// PublicKeyHex returns public key as hex
 func PublicKeyHex(pub ed25519.PublicKey) string {
 	return fmt.Sprintf("%x", pub)
 }

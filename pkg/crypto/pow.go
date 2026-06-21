@@ -27,11 +27,11 @@ const (
 	ScryptP = 1
 	KeyLen  = 32
 
-	// Salt ثابت للشبكة
+	// Fixed salt for the network
 	PowSalt = "musketeers-pow-v1"
 )
 
-// DynamicDifficultyAdjuster يضبط الصعوبة ديناميكياً
+// DynamicDifficultyAdjuster dynamically adjusts difficulty
 type DynamicDifficultyAdjuster struct {
 	mu                sync.RWMutex
 	currentDifficulty int32
@@ -56,7 +56,7 @@ func NewDynamicDifficultyAdjuster() *DynamicDifficultyAdjuster {
 	}
 }
 
-// RecordBlock يسجل كتلة جديدة
+// RecordBlock records a new block
 func (dda *DynamicDifficultyAdjuster) RecordBlock(duration time.Duration) {
 	dda.mu.Lock()
 	defer dda.mu.Unlock()
@@ -66,29 +66,29 @@ func (dda *DynamicDifficultyAdjuster) RecordBlock(duration time.Duration) {
 		Duration:  duration,
 	})
 
-	// الحفاظ على الحجم
+	// Maintain size
 	if len(dda.history) > dda.maxHistory {
 		dda.history = dda.history[1:]
 	}
 
-	// الضبط كل 100 كتلة أو 10 دقائق
+	// Adjust every 100 blocks or 10 minutes
 	if len(dda.history) >= 100 || time.Since(dda.lastAdjustment) >= 10*time.Minute {
 		dda.adjust()
 	}
 }
 
-// adjust يضبط الصعوبة - ✅ معطل لضمان صعوبة ثابتة
+// adjust adjusts difficulty - disabled to ensure constant difficulty
 func (dda *DynamicDifficultyAdjuster) adjust() {
-	// ✅ تعطيل الضبط الديناميكي لضمان صعوبة ثابتة على 1
-	// لمنع توقف الأجهزة الضعيفة
+	// Disable dynamic adjustment to ensure constant difficulty of 1
+	// Prevent weak devices from stopping
 }
 
-// GetDifficulty يعيد الصعوبة الحالية
+// GetDifficulty returns the current difficulty
 func (dda *DynamicDifficultyAdjuster) GetDifficulty() int {
 	return int(atomic.LoadInt32(&dda.currentDifficulty))
 }
 
-// PoWResult نتيجة التعدين
+// PoWResult mining result
 type PoWResult struct {
 	Nonce      string
 	Hash       string
@@ -97,12 +97,12 @@ type PoWResult struct {
 	Attempts   int64
 }
 
-// MineIdentity يقوم بتعدين هوية جديدة
+// MineIdentity mines a new identity
 func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, error) {
 	startTime := time.Now()
 	workers := runtime.NumCPU()
 	if workers > 16 {
-		workers = 16 // حد أقصى
+		workers = 16 // Maximum limit
 	}
 
 	resultChan := make(chan *PoWResult, 1)
@@ -124,7 +124,7 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 				return
 			}
 
-			// كل worker يبدأ من نقطة مختلفة
+			// Each worker starts from a different point
 			start := int64(workerID) * 10000000
 
 			for i := start; i < start+10000000; i++ {
@@ -136,14 +136,14 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 
 				atomic.AddInt64(&attempts, 1)
 
-				// تحديث nonce
+				// Update nonce
 				nonce[0] = byte(i & 0xff)
 				nonce[1] = byte((i >> 8) & 0xff)
 				nonce[2] = byte((i >> 16) & 0xff)
 				nonce[3] = byte((i >> 24) & 0xff)
 				nonce[4] = byte(workerID)
 
-				// حساب hash
+				// Calculate hash
 				hash, err := scrypt.Key(
 					[]byte(did+hex.EncodeToString(nonce)),
 					[]byte(PowSalt),
@@ -154,7 +154,7 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 					return
 				}
 
-				// التحقق من الصعوبة
+				// Check difficulty
 				if checkDifficulty(hash, difficulty) {
 					result := &PoWResult{
 						Nonce:      hex.EncodeToString(nonce),
@@ -166,7 +166,7 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 
 					select {
 					case resultChan <- result:
-						cancel() // إيقاف العمال الآخرين
+						cancel() // Stop other workers
 					default:
 					}
 					return
@@ -175,7 +175,7 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 		}(w)
 	}
 
-	// انتظار النتيجة
+	// Wait for result
 	go func() {
 		wg.Wait()
 		close(resultChan)
@@ -185,7 +185,7 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 	select {
 	case result := <-resultChan:
 		if result == nil {
-			return nil, fmt.Errorf("فشل التعدين")
+			return nil, fmt.Errorf("mining failed")
 		}
 		return result, nil
 
@@ -197,19 +197,19 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 	}
 }
 
-// checkDifficulty يتحقق من الصعوبة
+// checkDifficulty checks the difficulty
 func checkDifficulty(hash []byte, difficulty int) bool {
 	requiredZeros := difficulty / 8
 	requiredBits := difficulty % 8
 
-	// التحقق من الأصفار الكاملة
+	// Check full zeros
 	for i := 0; i < requiredZeros; i++ {
 		if i >= len(hash) || hash[i] != 0 {
 			return false
 		}
 	}
 
-	// التحقق من البتات الإضافية
+	// Check additional bits
 	if requiredBits > 0 && requiredZeros < len(hash) {
 		mask := byte(0xff << (8 - requiredBits))
 		if hash[requiredZeros]&mask != 0 {
@@ -220,7 +220,7 @@ func checkDifficulty(hash []byte, difficulty int) bool {
 	return true
 }
 
-// VerifyPoW يتحقق من صحة PoW
+// VerifyPoW verifies PoW validity
 func VerifyPoW(did, nonce string, difficulty int) (bool, error) {
 	hash, err := scrypt.Key(
 		[]byte(did+nonce),
@@ -234,9 +234,9 @@ func VerifyPoW(did, nonce string, difficulty int) (bool, error) {
 	return checkDifficulty(hash, difficulty), nil
 }
 
-// EstimateMiningTime يحسب الوقت المتوقع للتعدين
+// EstimateMiningTime calculates expected mining time
 func EstimateMiningTime(difficulty int, hashRate float64) time.Duration {
-	// عدد المحاولات المتوقعة = 2^difficulty
+	// Expected attempts = 2^difficulty
 	expectedAttempts := float64(uint64(1) << uint(difficulty))
 	seconds := expectedAttempts / hashRate
 	return time.Duration(seconds) * time.Second

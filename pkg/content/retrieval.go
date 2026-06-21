@@ -10,7 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Fetcher يجلب المحتوى من الشبكة
+// Fetcher fetches content from network
 type Fetcher struct {
 	host     host.Host
 	provider *ProviderManager
@@ -18,7 +18,7 @@ type Fetcher struct {
 	log      *logrus.Entry
 }
 
-// NewFetcher ينشئ fetcher
+// NewFetcher creates fetcher
 func NewFetcher(h host.Host, pm *ProviderManager, store BlockStore, log *logrus.Logger) *Fetcher {
 	return &Fetcher{
 		host:     h,
@@ -28,24 +28,24 @@ func NewFetcher(h host.Host, pm *ProviderManager, store BlockStore, log *logrus.
 	}
 }
 
-// FetchContent يجلب محتوى بالـ CID
+// FetchContent fetches content by CID
 func (f *Fetcher) FetchContent(ctx context.Context, cid string, did string) ([]byte, error) {
-	// 1. بحث محلي
+	// 1. Local search
 	data, err := f.store.Get(cid)
 	if err == nil {
 		return data, nil
 	}
 
-	// 2. بحث عن موفرين
+	// 2. Search for providers
 	providers, err := f.provider.FindProviders(ctx, cid)
 	if err != nil {
-		return nil, fmt.Errorf("لم يُعثر على موفرين: %w", err)
+		return nil, fmt.Errorf("no providers found: %w", err)
 	}
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("لا يوجد موفرون لـ %s", cid)
+		return nil, fmt.Errorf("no providers for %s", cid)
 	}
 
-	// 3. جلب متوازٍ من عدة موفرين — أول استجابة صالحة تفوز
+	// 3. Parallel fetch from multiple providers — first valid response wins
 	type result struct {
 		data []byte
 		err  error
@@ -70,12 +70,12 @@ func (f *Fetcher) FetchContent(ctx context.Context, cid string, did string) ([]b
 	var lastErr error
 	for res := range resultCh {
 		if res.err == nil {
-			// 4. تخزين محلي وإعادة توفير
+			// 4. Local storage and re-provisioning
 			if putErr := f.store.Put(cid, res.data, did); putErr != nil {
-				f.log.WithError(putErr).Warn("فشل تخزين الكتلة محلياً")
+				f.log.WithError(putErr).Warn("failed to store block locally")
 			}
 			if provErr := f.provider.AddProvider(ctx, cid); provErr != nil {
-				f.log.WithError(provErr).Debug("فشل إعادة التوفير")
+				f.log.WithError(provErr).Debug("failed to re-provision")
 			}
 			return res.data, nil
 		}
@@ -83,7 +83,7 @@ func (f *Fetcher) FetchContent(ctx context.Context, cid string, did string) ([]b
 	}
 
 	if lastErr != nil {
-		return nil, fmt.Errorf("فشل جلب المحتوى: %w", lastErr)
+		return nil, fmt.Errorf("failed to fetch content: %w", lastErr)
 	}
-	return nil, fmt.Errorf("فشل جلب المحتوى من جميع الموفرين")
+	return nil, fmt.Errorf("failed to fetch content from all providers")
 }
