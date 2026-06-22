@@ -24,6 +24,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/providers"
 	"github.com/MortalArena/Musketeers/pkg/providers/builtin"
 	pkgSession "github.com/MortalArena/Musketeers/pkg/session"
+	"github.com/MortalArena/Musketeers/pkg/session/core"
 	"github.com/MortalArena/Musketeers/pkg/storage"
 	pkgVerification "github.com/MortalArena/Musketeers/pkg/verification"
 
@@ -132,6 +133,88 @@ func main() {
 	zapLogger := zap.NewNop()
 	agentRegistry.SetLogger(zapLogger)
 	log.Info("Agent Registry created")
+
+	// إنشاء ReservationManager لحجز الوكلاء المحليين
+	reservationManager := pkgAgent.NewReservationManager(zapLogger)
+	// بدء مجدول تنظيف الحجوز المنتهية كل 5 دقائق
+	reservationManager.StartCleanupScheduler(5 * time.Minute)
+	log.Info("ReservationManager created and cleanup scheduler started")
+
+	// إنشاء UnifiedSessionManager لدعم جلسات متعددة
+	sessionManager := core.NewUnifiedSessionManager(zapLogger)
+	log.Info("UnifiedSessionManager created")
+
+	// إنشاء SessionBridgeManager لربط الجلسات المنفصلة
+	sessionBridgeManager := pkgSession.NewSessionBridgeManager(eb, zapLogger)
+	log.Info("SessionBridgeManager created")
+
+	// إنشاء جلسات متعددة كمثال
+	// الجلسة 1: مشروع A
+	session1, err := sessionManager.CreateSession(ctx, "Project A", kp.DID, "manager-1", []string{"coder-1", "reviewer-1"})
+	if err != nil {
+		log.WithError(err).Warn("Failed to create session 1")
+	} else {
+		log.WithField("session_id", session1.ID).Info("Session 1 created")
+	}
+
+	// الجلسة 2: مشروع B
+	session2, err := sessionManager.CreateSession(ctx, "Project B", kp.DID, "manager-2", []string{"coder-2", "reviewer-2"})
+	if err != nil {
+		log.WithError(err).Warn("Failed to create session 2")
+	} else {
+		log.WithField("session_id", session2.ID).Info("Session 2 created")
+	}
+
+	// الجلسة 3: مشروع C
+	session3, err := sessionManager.CreateSession(ctx, "Project C", kp.DID, "manager-3", []string{"coder-3", "reviewer-3"})
+	if err != nil {
+		log.WithError(err).Warn("Failed to create session 3")
+	} else {
+		log.WithField("session_id", session3.ID).Info("Session 3 created")
+	}
+
+	// إحصائيات الجلسات
+	sessions := sessionManager.ListSessions()
+	log.WithField("total_sessions", len(sessions)).Info("Total sessions created")
+
+	// إنشاء جسور بين الجلسات كمثال
+	if len(sessions) >= 2 {
+		// جسر بين الجلسة 1 والجلسة 2
+		bridgeConfig1 := &pkgSession.BridgeConfig{
+			BridgeID:   "bridge-1-2",
+			SourceID:   sessions[0].ID,
+			TargetID:   sessions[1].ID,
+			BridgeType: pkgSession.BridgeTypeTwoWay,
+			BufferSize: 1000,
+		}
+		_, err := sessionBridgeManager.CreateBridge(ctx, bridgeConfig1)
+		if err != nil {
+			log.WithError(err).Warn("Failed to create bridge between session 1 and 2")
+		} else {
+			log.WithField("bridge_id", bridgeConfig1.BridgeID).Info("Bridge created between session 1 and 2")
+		}
+	}
+
+	if len(sessions) >= 3 {
+		// جسر بين الجلسة 2 والجلسة 3
+		bridgeConfig2 := &pkgSession.BridgeConfig{
+			BridgeID:   "bridge-2-3",
+			SourceID:   sessions[1].ID,
+			TargetID:   sessions[2].ID,
+			BridgeType: pkgSession.BridgeTypeTwoWay,
+			BufferSize: 1000,
+		}
+		_, err := sessionBridgeManager.CreateBridge(ctx, bridgeConfig2)
+		if err != nil {
+			log.WithError(err).Warn("Failed to create bridge between session 2 and 3")
+		} else {
+			log.WithField("bridge_id", bridgeConfig2.BridgeID).Info("Bridge created between session 2 and 3")
+		}
+	}
+
+	// إحصائيات الجسور
+	bridgeStats := sessionBridgeManager.GetStats()
+	log.WithField("total_bridges", bridgeStats["total_bridges"]).Info("Total bridges created")
 
 	// إنشاء EmailManager المتكامل
 	emailManager := orchestrator.NewEmailManager(eb, nil, zapLogger)
