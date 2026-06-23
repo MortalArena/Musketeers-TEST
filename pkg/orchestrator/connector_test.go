@@ -14,6 +14,7 @@ import (
 func TestConnectorCreation(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop() // [FIX] إغلاق EventBus لمنع goroutine leak
 
 	// إنشاء MultiplexedBridge
 	log := logrus.New()
@@ -37,6 +38,7 @@ func TestConnectorCreation(t *testing.T) {
 func TestConnectorStartStop(t *testing.T) {
 	// إنشاء المكونات
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop() // [FIX] إغلاق EventBus لمنع goroutine leak
 	log := logrus.New()
 	bridge := agent_bridge.NewMultiplexedBridge(log)
 	agentRegistry := agent.NewAgentRegistry()

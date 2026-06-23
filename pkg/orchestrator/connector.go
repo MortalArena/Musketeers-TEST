@@ -213,8 +213,25 @@ func (c *Connector) Stop() error {
 		c.logger.Error("فشل إيقاف Email Manager", zap.Error(err))
 	}
 
+	// [FIX] إيقاف EventBus لمنع goroutine leaks
+	c.eventBus.Stop()
+
 	c.cancel()
-	c.wg.Wait()
+
+	// [FIX] إضافة timeout للانتظار
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// WaitGroup انتهى بنجاح
+	case <-time.After(5 * time.Second):
+		// [FIX] timeout - لا ننتظر أكثر من 5 ثواني
+		c.logger.Warn("Timeout أثناء انتظار goroutines للإنهاء")
+	}
 
 	close(c.bridgeToEventBus)
 	close(c.eventBusToBridge)
@@ -369,8 +386,7 @@ func (c *Connector) bridgeHandler() {
 		go c.processLane(laneType)
 	}
 
-	// انتظار حتى تنتهي جميع goroutines
-	c.wg.Wait()
+	// [FIX] لا ننتظر goroutines هنا - سينتهون عند cancel
 }
 
 // processLane يعالج مسار معين
@@ -390,10 +406,24 @@ func (c *Connector) processLane(laneType agent_bridge.LaneType) {
 			// قراءة رسالة من المسار
 			msg, err := c.bridge.Receive(laneType)
 			if err != nil {
-				continue
+				// [FIX] إذا حدث خطأ، تحقق من context
+				select {
+				case <-c.ctx.Done():
+					return
+				default:
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
 			}
 			if msg == nil {
-				continue
+				// [FIX] إذا لم تكن هناك رسالة، تحقق من context
+				select {
+				case <-c.ctx.Done():
+					return
+				default:
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
 			}
 
 			// تحديث المقاييس
@@ -403,7 +433,11 @@ func (c *Connector) processLane(laneType agent_bridge.LaneType) {
 			c.mu.Unlock()
 
 			// إرسال للمعالج
-			c.bridgeToEventBus <- msg
+			select {
+			case <-c.ctx.Done():
+				return
+			case c.bridgeToEventBus <- msg:
+			}
 		}
 	}
 }

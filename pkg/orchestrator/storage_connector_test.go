@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"testing"
+	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/eventbus"
 	"go.uber.org/zap"
@@ -170,20 +171,20 @@ func TestStorageConnectorListFiles(t *testing.T) {
 
 	// إنشاء ملفات
 	file1 := &StorageFile{
-		Name:     "test1.txt",
-		Size:     1024,
-		Type:     "text/plain",
-		Content:  []byte("test content 1"),
-		OwnerDID: "did:example:123",
+		Name:      "test1.txt",
+		Size:      1024,
+		Type:      "text/plain",
+		Content:   []byte("test content 1"),
+		OwnerDID:  "did:example:123",
 		SessionID: "session-123",
 	}
 
 	file2 := &StorageFile{
-		Name:     "test2.txt",
-		Size:     2048,
-		Type:     "text/plain",
-		Content:  []byte("test content 2"),
-		OwnerDID: "did:example:456",
+		Name:      "test2.txt",
+		Size:      2048,
+		Type:      "text/plain",
+		Content:   []byte("test content 2"),
+		OwnerDID:  "did:example:456",
 		SessionID: "session-123",
 	}
 
@@ -208,6 +209,7 @@ func TestStorageConnectorListFiles(t *testing.T) {
 func TestStorageConnectorListFilesByOwner(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء StorageConnector
 	storageConnector := NewStorageConnector(eventBus, nil, zap.NewNop())
@@ -236,26 +238,40 @@ func TestStorageConnectorListFilesByOwner(t *testing.T) {
 	}
 
 	// تخزين الملفات
+	t.Logf("تخزين الملف 1: OwnerDID=%s", file1.OwnerDID)
 	if err := storageConnector.StoreFile(file1); err != nil {
 		t.Fatalf("فشل تخزين الملف 1: %v", err)
 	}
+	t.Logf("تم تخزين الملف 1 بنجاح")
+
+	t.Logf("تخزين الملف 2: OwnerDID=%s", file2.OwnerDID)
 	if err := storageConnector.StoreFile(file2); err != nil {
 		t.Fatalf("فشل تخزين الملف 2: %v", err)
 	}
+	t.Logf("تم تخزين الملف 2 بنجاح")
+
+	// [FIX] انتظار قصير للتأكد من التخزين
+	time.Sleep(100 * time.Millisecond)
 
 	// الحصول على قائمة الملفات حسب المالك
+	allFiles := storageConnector.ListFiles("", "")
+	t.Logf("عدد جميع الملفات الموجودة: %d", len(allFiles))
+	for _, f := range allFiles {
+		t.Logf("ملف: ID=%s, OwnerDID=%s", f.ID, f.OwnerDID)
+	}
+
 	files := storageConnector.ListFiles("did:example:123", "")
+	t.Logf("عدد ملفات did:example:123: %d", len(files))
 
 	if len(files) == 0 {
 		t.Error("يجب أن يكون هناك ملفات من المالك did:example:123")
 	}
-
-	t.Logf("عدد ملفات did:example:123: %d", len(files))
 }
 
 func TestStorageConnectorListFilesBySession(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء StorageConnector
 	storageConnector := NewStorageConnector(eventBus, nil, zap.NewNop())
@@ -268,39 +284,49 @@ func TestStorageConnectorListFilesBySession(t *testing.T) {
 
 	// إنشاء ملفات
 	file1 := &StorageFile{
-		Name:     "test1.txt",
-		Size:     1024,
-		Type:     "text/plain",
-		Content:  []byte("test content 1"),
-		OwnerDID: "did:example:123",
+		Name:      "test1.txt",
+		Size:      1024,
+		Type:      "text/plain",
+		Content:   []byte("test content 1"),
+		OwnerDID:  "did:example:123",
 		SessionID: "session-123",
 	}
 
 	file2 := &StorageFile{
-		Name:     "test2.txt",
-		Size:     2048,
-		Type:     "text/plain",
-		Content:  []byte("test content 2"),
-		OwnerDID: "did:example:456",
+		Name:      "test2.txt",
+		Size:      2048,
+		Type:      "text/plain",
+		Content:   []byte("test content 2"),
+		OwnerDID:  "did:example:456",
 		SessionID: "session-456",
 	}
 
 	// تخزين الملفات
+	t.Logf("تخزين الملف 1: SessionID=%s", file1.SessionID)
 	if err := storageConnector.StoreFile(file1); err != nil {
 		t.Fatalf("فشل تخزين الملف 1: %v", err)
 	}
+	t.Logf("تم تخزين الملف 1 بنجاح")
+
+	t.Logf("تخزين الملف 2: SessionID=%s", file2.SessionID)
 	if err := storageConnector.StoreFile(file2); err != nil {
 		t.Fatalf("فشل تخزين الملف 2: %v", err)
 	}
+	t.Logf("تم تخزين الملف 2 بنجاح")
+
+	// [FIX] انتظار قصير للتأكد من التخزين
+	time.Sleep(100 * time.Millisecond)
 
 	// الحصول على قائمة الملفات حسب الجلسة
+	allFiles := storageConnector.ListFiles("", "")
+	t.Logf("عدد جميع الملفات الموجودة: %d", len(allFiles))
+
 	files := storageConnector.ListFiles("", "session-123")
+	t.Logf("عدد ملفات session-123: %d", len(files))
 
 	if len(files) == 0 {
 		t.Error("يجب أن يكون هناك ملفات من الجلسة session-123")
 	}
-
-	t.Logf("عدد ملفات session-123: %d", len(files))
 }
 
 func TestStorageConnectorGetMetrics(t *testing.T) {

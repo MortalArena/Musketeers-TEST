@@ -16,6 +16,7 @@ import (
 func TestChatConnectorCreation(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء AgentRegistry
 	agentRegistry := agent.NewAgentRegistry()
@@ -62,6 +63,7 @@ func TestChatConnectorCreation(t *testing.T) {
 func TestChatConnectorStartStop(t *testing.T) {
 	// إنشاء المكونات
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 	agentRegistry := agent.NewAgentRegistry()
 	zapLogger := zap.NewNop()
 	agentRegistry.SetLogger(zapLogger)
@@ -113,6 +115,7 @@ func TestChatConnectorStartStop(t *testing.T) {
 func TestChatConnectorPrivateChannel(t *testing.T) {
 	// إنشاء المكونات
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 	agentRegistry := agent.NewAgentRegistry()
 	zapLogger := zap.NewNop()
 	agentRegistry.SetLogger(zapLogger)
@@ -164,6 +167,7 @@ func TestChatConnectorPrivateChannel(t *testing.T) {
 func TestChatConnectorPublicChannel(t *testing.T) {
 	// إنشاء المكونات
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 	agentRegistry := agent.NewAgentRegistry()
 	zapLogger := zap.NewNop()
 	agentRegistry.SetLogger(zapLogger)
@@ -211,6 +215,7 @@ func TestChatConnectorPublicChannel(t *testing.T) {
 func TestChatConnectorSessionChannel(t *testing.T) {
 	// إنشاء المكونات
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 	agentRegistry := agent.NewAgentRegistry()
 	zapLogger := zap.NewNop()
 	agentRegistry.SetLogger(zapLogger)
@@ -262,6 +267,7 @@ func TestChatConnectorSessionChannel(t *testing.T) {
 func TestChatConnectorMetrics(t *testing.T) {
 	// إنشاء المكونات
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 	agentRegistry := agent.NewAgentRegistry()
 	zapLogger := zap.NewNop()
 	agentRegistry.SetLogger(zapLogger)

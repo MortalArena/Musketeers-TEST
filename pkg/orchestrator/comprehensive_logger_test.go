@@ -10,6 +10,7 @@ import (
 func TestComprehensiveLoggerCreation(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop() // [FIX] إغلاق EventBus لمنع goroutine leak
 
 	// إنشاء ComprehensiveLogger
 	logger := NewComprehensiveLogger(eventBus, zap.NewNop())
@@ -24,6 +25,7 @@ func TestComprehensiveLoggerCreation(t *testing.T) {
 func TestComprehensiveLoggerStartStop(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop() // [FIX] إغلاق EventBus لمنع goroutine leak
 
 	// إنشاء ComprehensiveLogger
 	logger := NewComprehensiveLogger(eventBus, zap.NewNop())
@@ -233,6 +235,7 @@ func TestComprehensiveLoggerGetLogsBySession(t *testing.T) {
 func TestComprehensiveLoggerGetMetrics(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop() // [FIX] إغلاق EventBus لمنع goroutine leak
 
 	// إنشاء ComprehensiveLogger
 	logger := NewComprehensiveLogger(eventBus, zap.NewNop())
@@ -263,6 +266,7 @@ func TestComprehensiveLoggerGetMetrics(t *testing.T) {
 func TestComprehensiveLoggerExportLogsToJSON(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop() // [FIX] إغلاق EventBus لمنع goroutine leak
 
 	// إنشاء ComprehensiveLogger
 	logger := NewComprehensiveLogger(eventBus, zap.NewNop())

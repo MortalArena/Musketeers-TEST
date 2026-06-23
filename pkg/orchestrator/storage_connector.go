@@ -34,6 +34,9 @@ type StorageConnector struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
+	// Counter for unique file IDs
+	fileCounter int64
+
 	// Logger
 	logger *zap.Logger
 
@@ -138,12 +141,18 @@ func (sc *StorageConnector) StoreFile(file *StorageFile) error {
 		}
 	}
 
-	file.ID = fmt.Sprintf("file_%d", time.Now().UnixNano())
+	// [FIX] تأكد من أن الملف له ID فريد باستخدام counter
+	sc.mu.Lock()
+	sc.fileCounter++
+	file.ID = fmt.Sprintf("file_%d_%d", time.Now().UnixNano(), sc.fileCounter)
 	file.CreatedAt = time.Now()
 	file.UpdatedAt = time.Now()
-
-	sc.mu.Lock()
 	sc.files[file.ID] = file
+	sc.logger.Debug("تم تخزين ملف",
+		zap.String("file_id", file.ID),
+		zap.String("owner_did", file.OwnerDID),
+		zap.Int("total_files", len(sc.files)),
+	)
 	sc.mu.Unlock()
 
 	// إرسال حدث
@@ -240,6 +249,13 @@ func (sc *StorageConnector) ListFiles(ownerDID string, sessionID string) []*Stor
 
 	var files []*StorageFile
 	for _, file := range sc.files {
+		sc.logger.Debug("فحص ملف",
+			zap.String("file_id", file.ID),
+			zap.String("owner_did", file.OwnerDID),
+			zap.String("search_owner", ownerDID),
+			zap.String("session_id", file.SessionID),
+			zap.String("search_session", sessionID),
+		)
 		if ownerDID != "" && file.OwnerDID != ownerDID {
 			continue
 		}
@@ -248,6 +264,13 @@ func (sc *StorageConnector) ListFiles(ownerDID string, sessionID string) []*Stor
 		}
 		files = append(files, file)
 	}
+
+	sc.logger.Debug("نتيجة ListFiles",
+		zap.String("owner_did", ownerDID),
+		zap.String("session_id", sessionID),
+		zap.Int("total_files", len(sc.files)),
+		zap.Int("matched_files", len(files)),
+	)
 
 	return files
 }

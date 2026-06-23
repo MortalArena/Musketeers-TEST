@@ -11,6 +11,7 @@ import (
 func TestA2AManagerCreation(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -25,6 +26,7 @@ func TestA2AManagerCreation(t *testing.T) {
 func TestA2AManagerStartStop(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -45,6 +47,7 @@ func TestA2AManagerStartStop(t *testing.T) {
 func TestA2AAgentRegistration(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -80,6 +83,7 @@ func TestA2AAgentRegistration(t *testing.T) {
 func TestA2AListAgents(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -103,6 +107,7 @@ func TestA2AListAgents(t *testing.T) {
 func TestA2AFindAgentsBySkill(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -126,6 +131,7 @@ func TestA2AFindAgentsBySkill(t *testing.T) {
 func TestA2ACreateSession(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -150,6 +156,7 @@ func TestA2ACreateSession(t *testing.T) {
 func TestA2AGetSession(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -176,6 +183,7 @@ func TestA2AGetSession(t *testing.T) {
 func TestA2AUpdateSessionStatus(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -207,6 +215,7 @@ func TestA2AUpdateSessionStatus(t *testing.T) {
 func TestA2ASendMessage(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -245,6 +254,7 @@ func TestA2ASendMessage(t *testing.T) {
 func TestA2ABroadcastMessage(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -274,6 +284,7 @@ func TestA2ABroadcastMessage(t *testing.T) {
 func TestA2AAssignTask(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -303,6 +314,7 @@ func TestA2AAssignTask(t *testing.T) {
 func TestA2ACompleteTask(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())
@@ -340,6 +352,7 @@ func TestA2ACompleteTask(t *testing.T) {
 func TestA2AGetMetrics(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء A2AManager
 	a2aManager := NewA2AManager(eventBus, zap.NewNop())

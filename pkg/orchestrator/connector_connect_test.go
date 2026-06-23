@@ -12,6 +12,7 @@ import (
 func TestConnectorGetOnlineAgents(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء AgentRegistry
 	agentRegistry := agent.NewAgentRegistry()
@@ -39,6 +40,7 @@ func TestConnectorGetOnlineAgents(t *testing.T) {
 func TestConnectorGetAllAgents(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء AgentRegistry
 	agentRegistry := agent.NewAgentRegistry()
@@ -66,6 +68,7 @@ func TestConnectorGetAllAgents(t *testing.T) {
 func TestConnectorGetAgentHealthReport(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء AgentRegistry
 	agentRegistry := agent.NewAgentRegistry()
@@ -93,6 +96,7 @@ func TestConnectorGetAgentHealthReport(t *testing.T) {
 func TestConnectorCleanupInactiveAgents(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء AgentRegistry
 	agentRegistry := agent.NewAgentRegistry()
@@ -120,6 +124,7 @@ func TestConnectorCleanupInactiveAgents(t *testing.T) {
 func TestConnectorGetAgentMetadata(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء AgentRegistry
 	agentRegistry := agent.NewAgentRegistry()
@@ -147,6 +152,7 @@ func TestConnectorGetAgentMetadata(t *testing.T) {
 func TestConnectorGetAgentStats(t *testing.T) {
 	// إنشاء EventBus
 	eventBus := eventbus.NewEventBus()
+	defer eventBus.Stop()
 
 	// إنشاء AgentRegistry
 	agentRegistry := agent.NewAgentRegistry()
