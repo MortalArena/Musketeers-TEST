@@ -95,11 +95,12 @@ type ProgressInfo struct {
 
 // SessionConfig إعدادات الجلسة
 type SessionConfig struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	OwnerDID    string `json:"owner_did"`
-	MaxAgents   int    `json:"max_agents"`
-	ProjectType string `json:"project_type"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	OwnerDID      string `json:"owner_did"`
+	MaxAgents     int    `json:"max_agents"`
+	ProjectType   string `json:"project_type"`
+	SessionFolder string `json:"session_folder,omitempty"` // فولدر الجلسة المخصص
 }
 
 // [SAFETY] حدود الموارد لمنع استهلاك غير محدود
@@ -171,8 +172,12 @@ func NewSessionContainer(ctx context.Context, db *badger.DB, config *SessionConf
 	session.Aggregator = NewAggregator(session.ID)
 	session.Reviewer = NewFinalReviewer()
 
-	// [WHY] تهيئة ChatManager
-	session.ChatManager = NewChatManager(session.ID, eb)
+	// تهيئة ChatManager مع فولدر الجلسة
+	if config.SessionFolder != "" {
+		session.ChatManager = NewChatManagerWithFolder(session.ID, eb, config.SessionFolder)
+	} else {
+		session.ChatManager = NewChatManager(session.ID, eb)
+	}
 
 	// [WHY] تهيئة الحالة الموحدة
 	session.state = UnifiedSessionState{

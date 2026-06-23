@@ -19,11 +19,15 @@ type CollectiveMemory struct {
 	Procedural []MemoryWorkflow `json:"procedural"` // طرق (كيف نفعل؟)
 	Meta       []MemoryStrategy `json:"meta"`       // استراتيجيات (كيف نفكر؟)
 
+	// المعرفة الجماعية - ملفات/لينكات/داتا من العميل البشري
+	Knowledge []KnowledgeItem `json:"knowledge"` // ملفات المشروع والموارد
+
 	// إحصائيات
 	TotalEvents     int `json:"total_events"`
 	TotalFacts      int `json:"total_facts"`
 	TotalWorkflows  int `json:"total_workflows"`
 	TotalStrategies int `json:"total_strategies"`
+	TotalKnowledge  int `json:"total_knowledge"`
 
 	DB *badger.DB
 	mu sync.RWMutex
@@ -39,6 +43,8 @@ const (
 	MaxProceduralWorkflows = 1000
 	// [SAFETY] الحد الأقصى لعدد الاستراتيجيات
 	MaxMetaStrategies = 500
+	// [SAFETY] الحد الأقصى لعدد عناصر المعرفة
+	MaxKnowledgeItems = 1000
 	// [SAFETY] الحد الأقصى لقيمة الثقة
 	MaxConfidence = 1.0
 	// [SAFETY] الحد الأدنى لقيمة الثقة
@@ -104,6 +110,22 @@ type MemoryStrategy struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// KnowledgeItem عنصر معرفة من العميل البشري (ملف/لينك/داتا)
+type KnowledgeItem struct {
+	ID          string    `json:"id"`
+	Type        string    `json:"type"` // file, link, data, image, document
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Content     string    `json:"content"`                // محتوى Markdown المحول
+	OriginalURL string    `json:"original_url,omitempty"` // الرابط الأصلي (إن وجد)
+	FilePath    string    `json:"file_path,omitempty"`    // مسار الملف المحلي
+	ProcessedAt time.Time `json:"processed_at"`
+	ProcessedBy string    `json:"processed_by"` // الوكيل الذي قام بالتحويل
+	Category    string    `json:"category"`     // requirements, design, reference, etc.
+	Tags        []string  `json:"tags"`
+	Priority    int       `json:"priority"` // 1-10
+}
+
 // NewCollectiveMemory ينشئ ذاكرة جماعية جديدة
 func NewCollectiveMemory(sessionID string, db *badger.DB) *CollectiveMemory {
 	return &CollectiveMemory{
@@ -112,6 +134,7 @@ func NewCollectiveMemory(sessionID string, db *badger.DB) *CollectiveMemory {
 		Semantic:   make([]MemoryFact, 0),
 		Procedural: make([]MemoryWorkflow, 0),
 		Meta:       make([]MemoryStrategy, 0),
+		Knowledge:  make([]KnowledgeItem, 0),
 		DB:         db,
 	}
 }
@@ -345,6 +368,7 @@ func (cm *CollectiveMemory) Clone() *CollectiveMemory {
 		TotalFacts:      cm.TotalFacts,
 		TotalWorkflows:  cm.TotalWorkflows,
 		TotalStrategies: cm.TotalStrategies,
+		TotalKnowledge:  cm.TotalKnowledge,
 		DB:              cm.DB,
 	}
 
@@ -360,5 +384,97 @@ func (cm *CollectiveMemory) Clone() *CollectiveMemory {
 	clone.Meta = make([]MemoryStrategy, len(cm.Meta))
 	copy(clone.Meta, cm.Meta)
 
+	clone.Knowledge = make([]KnowledgeItem, len(cm.Knowledge))
+	copy(clone.Knowledge, cm.Knowledge)
+
 	return clone
+}
+
+// AddKnowledge يضيف عنصر معرفة جديد (ملف/لينك/داتا)
+func (cm *CollectiveMemory) AddKnowledge(item KnowledgeItem) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if item.Type == "" {
+		return fmt.Errorf("knowledge type cannot be empty")
+	}
+	if item.Name == "" {
+		return fmt.Errorf("knowledge name cannot be empty")
+	}
+	if item.Content == "" && item.OriginalURL == "" && item.FilePath == "" {
+		return fmt.Errorf("knowledge must have content, URL, or file path")
+	}
+
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى
+	if len(cm.Knowledge) >= MaxKnowledgeItems {
+		return fmt.Errorf("maximum knowledge items limit reached (%d)", MaxKnowledgeItems)
+	}
+
+	item.ID = fmt.Sprintf("kno_%d", len(cm.Knowledge)+1)
+	item.ProcessedAt = time.Now()
+
+	cm.Knowledge = append(cm.Knowledge, item)
+	cm.TotalKnowledge++
+
+	// حفظ في DB
+	data, _ := json.Marshal(item)
+	return cm.DB.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(fmt.Sprintf("knowledge_%s_%s", cm.SessionID, item.ID)), data)
+	})
+}
+
+// GetKnowledgeByCategory يحصل على المعرفة حسب الفئة
+func (cm *CollectiveMemory) GetKnowledgeByCategory(category string) []KnowledgeItem {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	var result []KnowledgeItem
+	for _, item := range cm.Knowledge {
+		if item.Category == category {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+// GetKnowledgeByPriority يحصل على المعرفة حسب الأولوية
+func (cm *CollectiveMemory) GetKnowledgeByPriority(minPriority int) []KnowledgeItem {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	var result []KnowledgeItem
+	for _, item := range cm.Knowledge {
+		if item.Priority >= minPriority {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+// SearchKnowledge يبحث في المعرفة حسب الكلمات المفتاحية
+func (cm *CollectiveMemory) SearchKnowledge(query string) []KnowledgeItem {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	var result []KnowledgeItem
+	for _, item := range cm.Knowledge {
+		// البحث في الاسم والوصف والمحتوى
+		if contains(item.Name, query) || contains(item.Description, query) || contains(item.Content, query) {
+			result = append(result, item)
+		}
+		// البحث في الوسوم
+		for _, tag := range item.Tags {
+			if contains(tag, query) {
+				result = append(result, item)
+				break
+			}
+		}
+	}
+	return result
+}
+
+// contains دالة مساعدة للبحث
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr))
 }

@@ -178,6 +178,9 @@ func NewServerWithTLS(n *node.Node, port int, log *logrus.Logger, tlsEnabled boo
 	mux.HandleFunc("/api/progress/", s.handleProgressBySession)
 	mux.HandleFunc("/api/memory", s.handleMemory)
 	mux.HandleFunc("/api/memory/", s.handleMemoryBySession)
+	mux.HandleFunc("/api/knowledge", s.handleKnowledge)
+	mux.HandleFunc("/api/knowledge/", s.handleKnowledgeBySession)
+	mux.HandleFunc("/api/knowledge/search", s.handleKnowledgeSearch)
 	mux.HandleFunc("/api/skills", s.handleSkills)
 	mux.HandleFunc("/api/skills/", s.handleSkillsBySession)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
@@ -1422,6 +1425,8 @@ func (s *Server) handleMemoryBySession(w http.ResponseWriter, r *http.Request) {
 				json.NewEncoder(w).Encode(mem.Procedural)
 			case "meta":
 				json.NewEncoder(w).Encode(mem.Meta)
+			case "knowledge":
+				json.NewEncoder(w).Encode(mem.Knowledge)
 			default:
 				http.Error(w, "نوع غير صالح", http.StatusBadRequest)
 			}
@@ -1439,10 +1444,12 @@ func (s *Server) handleMemoryBySession(w http.ResponseWriter, r *http.Request) {
 			mem.Semantic = []session.MemoryFact{}
 			mem.Procedural = []session.MemoryWorkflow{}
 			mem.Meta = []session.MemoryStrategy{}
+			mem.Knowledge = []session.KnowledgeItem{}
 			mem.TotalEvents = 0
 			mem.TotalFacts = 0
 			mem.TotalWorkflows = 0
 			mem.TotalStrategies = 0
+			mem.TotalKnowledge = 0
 		}
 		s.memoriesMu.Unlock()
 
@@ -1451,6 +1458,145 @@ func (s *Server) handleMemoryBySession(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// دوال المعرفة الجماعية
+func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodPost:
+		// إضافة عنصر معرفة جديد
+		var req struct {
+			SessionID   string   `json:"session_id"`
+			Type        string   `json:"type"`
+			Name        string   `json:"name"`
+			Description string   `json:"description"`
+			Content     string   `json:"content"`
+			OriginalURL string   `json:"original_url,omitempty"`
+			FilePath    string   `json:"file_path,omitempty"`
+			ProcessedBy string   `json:"processed_by,omitempty"`
+			Category    string   `json:"category,omitempty"`
+			Tags        []string `json:"tags,omitempty"`
+			Priority    int      `json:"priority,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "JSON غير صالح", http.StatusBadRequest)
+			return
+		}
+
+		s.memoriesMu.RLock()
+		mem, exists := s.memories[req.SessionID]
+		s.memoriesMu.RUnlock()
+
+		if !exists {
+			http.Error(w, "الجلسة غير موجودة", http.StatusNotFound)
+			return
+		}
+
+		item := session.KnowledgeItem{
+			Type:        req.Type,
+			Name:        req.Name,
+			Description: req.Description,
+			Content:     req.Content,
+			OriginalURL: req.OriginalURL,
+			FilePath:    req.FilePath,
+			ProcessedBy: req.ProcessedBy,
+			Category:    req.Category,
+			Tags:        req.Tags,
+			Priority:    req.Priority,
+		}
+
+		if err := mem.AddKnowledge(item); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"status": "added"})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleKnowledgeBySession(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// استخراج session ID من المسار
+	sessionID := strings.TrimPrefix(r.URL.Path, "/api/knowledge/")
+	if sessionID == "" {
+		http.Error(w, "session ID مطلوب", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// الحصول على المعرفة
+		s.memoriesMu.RLock()
+		mem, exists := s.memories[sessionID]
+		s.memoriesMu.RUnlock()
+
+		if !exists {
+			http.Error(w, "الجلسة غير موجودة", http.StatusNotFound)
+			return
+		}
+
+		// التحقق من query parameters
+		category := r.URL.Query().Get("category")
+		priority := r.URL.Query().Get("priority")
+
+		if category != "" {
+			// الحصول على معرفة حسب الفئة
+			items := mem.GetKnowledgeByCategory(category)
+			json.NewEncoder(w).Encode(items)
+		} else if priority != "" {
+			// الحصول على معرفة حسب الأولوية
+			minPriority := 0
+			fmt.Sscanf(priority, "%d", &minPriority)
+			items := mem.GetKnowledgeByPriority(minPriority)
+			json.NewEncoder(w).Encode(items)
+		} else {
+			// الحصول على جميع المعرفة
+			json.NewEncoder(w).Encode(mem.Knowledge)
+		}
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleKnowledgeSearch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// استخراج query
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "query مطلوب", http.StatusBadRequest)
+		return
+	}
+
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "session ID مطلوب", http.StatusBadRequest)
+		return
+	}
+
+	s.memoriesMu.RLock()
+	mem, exists := s.memories[sessionID]
+	s.memoriesMu.RUnlock()
+
+	if !exists {
+		http.Error(w, "الجلسة غير موجودة", http.StatusNotFound)
+		return
+	}
+
+	items := mem.SearchKnowledge(query)
+	json.NewEncoder(w).Encode(items)
 }
 
 // دوال مساعدة لاستخراج البيانات
