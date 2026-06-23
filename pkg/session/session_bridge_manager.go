@@ -21,6 +21,12 @@ type SessionBridgeManager struct {
 	mu       sync.RWMutex
 }
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لعدد الجسور لكل جلسة
+	MaxBridgesPerSession = 10
+)
+
 // NewSessionBridgeManager ينشئ مدير جسور جديد
 func NewSessionBridgeManager(eventBus *eventbus.EventBus, logger *zap.Logger) *SessionBridgeManager {
 	return &SessionBridgeManager{
@@ -33,8 +39,32 @@ func NewSessionBridgeManager(eventBus *eventbus.EventBus, logger *zap.Logger) *S
 
 // CreateBridge ينشئ جسر جديد بين جلستين
 func (sbm *SessionBridgeManager) CreateBridge(ctx context.Context, config *BridgeConfig) (*SessionBridge, error) {
+	// [SAFETY] التحقق من صحة المدخلات
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+	if config.SourceID == "" {
+		return nil, fmt.Errorf("source ID cannot be empty")
+	}
+	if config.TargetID == "" {
+		return nil, fmt.Errorf("target ID cannot be empty")
+	}
+
 	sbm.mu.Lock()
 	defer sbm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للجسور
+	if len(sbm.bridges) >= MaxBridges {
+		return nil, fmt.Errorf("maximum bridges limit reached (%d)", MaxBridges)
+	}
+
+	// [SAFETY] التحقق من الحد الأقصى للجسور لكل جلسة
+	if len(sbm.sessions[config.SourceID]) >= MaxBridgesPerSession {
+		return nil, fmt.Errorf("maximum bridges per session limit reached (%d)", MaxBridgesPerSession)
+	}
+	if len(sbm.sessions[config.TargetID]) >= MaxBridgesPerSession {
+		return nil, fmt.Errorf("maximum bridges per session limit reached (%d)", MaxBridgesPerSession)
+	}
 
 	// التحقق من عدم وجود الجسر بالفعل
 	if _, exists := sbm.bridges[config.BridgeID]; exists {

@@ -102,6 +102,18 @@ type SessionConfig struct {
 	ProjectType string `json:"project_type"`
 }
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لعدد الوكلاء في الحالة الموحدة
+	MaxAgentsInState = 20
+	// [SAFETY] الحد الأقصى لعدد المهام في الحالة الموحدة
+	MaxTasksInState = 100
+	// [SAFETY] الحد الأقصى لاسم الجلسة
+	MaxSessionNameLength = 200
+	// [SAFETY] الحد الأقصى لوصف الجلسة
+	MaxSessionDescriptionLength = 2000
+)
+
 // NewSessionContainer ينشئ حاوية جلسة جديدة
 // [WHY] يهيئ جميع المكونات بما فيها ChatManager والحالة الموحدة
 // [HOW] ينشئ ChatManager ويهيئ UnifiedSessionState
@@ -109,6 +121,26 @@ type SessionConfig struct {
 func NewSessionContainer(ctx context.Context, db *badger.DB, config *SessionConfig, eb *eventbus.EventBus) (*SessionContainer, error) {
 	if eb == nil {
 		return nil, fmt.Errorf("eventBus cannot be nil") // [SAFETY] منع nil pointer
+	}
+
+	// [SAFETY] التحقق من صحة الإعدادات
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+	if config.Name == "" {
+		return nil, fmt.Errorf("session name cannot be empty")
+	}
+	if len(config.Name) > MaxSessionNameLength {
+		return nil, fmt.Errorf("session name too long (max %d characters)", MaxSessionNameLength)
+	}
+	if len(config.Description) > MaxSessionDescriptionLength {
+		return nil, fmt.Errorf("session description too long (max %d characters)", MaxSessionDescriptionLength)
+	}
+	if config.OwnerDID == "" {
+		return nil, fmt.Errorf("owner DID cannot be empty")
+	}
+	if config.MaxAgents <= 0 || config.MaxAgents > MaxAgentsInState {
+		return nil, fmt.Errorf("max agents must be between 1 and %d", MaxAgentsInState)
 	}
 
 	sessionCtx, cancel := context.WithCancel(ctx)
@@ -286,8 +318,28 @@ func (s *SessionContainer) UpdateTaskStatus(taskID, status string) error {
 // [HOW] يضيف المهمة للحالة الموحدة وينشر حدث session.state.changed
 // [SAFETY] يفك القفل قبل استدعاء eventBus.Publish لمنع Deadlock
 func (s *SessionContainer) AddTask(taskID, title, assignedTo, priority string) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if taskID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	if title == "" {
+		return fmt.Errorf("task title cannot be empty")
+	}
+	if assignedTo == "" {
+		return fmt.Errorf("task assigned to cannot be empty")
+	}
+	if priority == "" {
+		return fmt.Errorf("task priority cannot be empty")
+	}
+
 	// [SAFETY] قفل للكتابة على الحالة الموحدة
 	s.stateMu.Lock()
+
+	// [SAFETY] التحقق من الحد الأقصى للمهام
+	if len(s.state.Tasks) >= MaxTasksInState {
+		s.stateMu.Unlock()
+		return fmt.Errorf("maximum tasks limit reached (%d)", MaxTasksInState)
+	}
 
 	// [HOW] إضافة المهمة للحالة الموحدة
 	s.state.Tasks = append(s.state.Tasks, TaskInfo{
@@ -322,10 +374,34 @@ func (s *SessionContainer) AddTask(taskID, title, assignedTo, priority string) e
 // [HOW] يضيف الوكيل للحالة الموحدة وينشر حدث session.state.changed
 // [SAFETY] يفك القفل قبل استدعاء eventBus.Publish لمنع Deadlock
 func (s *SessionContainer) AddAgent(did, name, role string) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if did == "" {
+		return fmt.Errorf("agent DID cannot be empty")
+	}
+	if name == "" {
+		return fmt.Errorf("agent name cannot be empty")
+	}
+	if role == "" {
+		return fmt.Errorf("agent role cannot be empty")
+	}
+
 	// [SAFETY] قفل للكتابة على الحالة الموحدة
 	s.stateMu.Lock()
 
-	// [HOW] إضافة الوكيل للحالة الموحدة
+	// [SAFETY] التحقق من الحد الأقصى للوكلاء
+	if len(s.state.Agents) >= MaxAgentsInState {
+		s.stateMu.Unlock()
+		return fmt.Errorf("maximum agents limit reached (%d)", MaxAgentsInState)
+	}
+
+	// [HOW] إضافة الوكيل للحالة الموحدة مع معالجة الأخطاء
+	defer func() {
+		if r := recover(); r != nil {
+			s.stateMu.Unlock()
+			panic(r) // إعادة إطلاق panic بعد فك القفل
+		}
+	}()
+
 	s.state.Agents = append(s.state.Agents, AgentInfo{
 		DID:    did,
 		Name:   name,

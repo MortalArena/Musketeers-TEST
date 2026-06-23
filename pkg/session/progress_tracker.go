@@ -71,6 +71,20 @@ type ProgressTracker struct {
 	mu sync.RWMutex
 }
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لعدد مقاييس التقدم لكل مهمة
+	MaxProgressMetricsPerTask = 1000
+	// [SAFETY] الحد الأقصى لعدد التأخيرات
+	MaxDelays = 500
+	// [SAFETY] الحد الأقصى لعدد المخاطر
+	MaxRisks = 100
+	// [SAFETY] الحد الأقصى لقيمة التقدم
+	MaxProgress = 100.0
+	// [SAFETY] الحد الأدنى لقيمة التقدم
+	MinProgress = 0.0
+)
+
 // NewProgressTracker ينشئ متتبع تقدم جديد
 func NewProgressTracker(sessionID string) *ProgressTracker {
 	return &ProgressTracker{
@@ -108,8 +122,27 @@ func (pt *ProgressTracker) SetEventBus(eb *eventbus.EventBus) {
 
 // RecordProgress يسجل تقدم مهمة
 func (pt *ProgressTracker) RecordProgress(ctx context.Context, taskID, agentID, phase string, progress float64, metadata map[string]interface{}) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if taskID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	if agentID == "" {
+		return fmt.Errorf("agent ID cannot be empty")
+	}
+	if phase == "" {
+		return fmt.Errorf("phase cannot be empty")
+	}
+	if progress < MinProgress || progress > MaxProgress {
+		return fmt.Errorf("progress must be between %.1f and %.1f", MinProgress, MaxProgress)
+	}
+
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى لمقاييس التقدم
+	if len(pt.progressMetrics[taskID]) >= MaxProgressMetricsPerTask {
+		return fmt.Errorf("maximum progress metrics per task limit reached (%d)", MaxProgressMetricsPerTask)
+	}
 
 	metric := ProgressMetric{
 		TaskID:    taskID,
@@ -146,8 +179,24 @@ func (pt *ProgressTracker) RecordProgress(ctx context.Context, taskID, agentID, 
 
 // RecordDelay يسجل تأخير مهمة
 func (pt *ProgressTracker) RecordDelay(ctx context.Context, taskID, agentID string, expectedTime, actualTime time.Time, reason string) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if taskID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	if agentID == "" {
+		return fmt.Errorf("agent ID cannot be empty")
+	}
+	if reason == "" {
+		return fmt.Errorf("reason cannot be empty")
+	}
+
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للتأخيرات
+	if len(pt.delays) >= MaxDelays {
+		return fmt.Errorf("maximum delays limit reached (%d)", MaxDelays)
+	}
 
 	delayDuration := actualTime.Sub(expectedTime)
 	if delayDuration < 0 {
@@ -203,6 +252,15 @@ func (pt *ProgressTracker) RecordRisk(ctx context.Context, taskID, agentID strin
 
 // recordRisk يسجل مخاطرة (داخلي)
 func (pt *ProgressTracker) recordRisk(taskID, agentID string, riskLevel RiskLevel, description string, metadata map[string]interface{}) {
+	// [SAFETY] التحقق من الحد الأقصى للمخاطر
+	if len(pt.risks) >= MaxRisks {
+		pt.logger.Warn("Maximum risks limit reached, skipping risk recording",
+			zap.String("task_id", taskID),
+			zap.String("risk_level", string(riskLevel)),
+		)
+		return
+	}
+
 	risk := RiskInfo{
 		TaskID:      taskID,
 		AgentID:     agentID,

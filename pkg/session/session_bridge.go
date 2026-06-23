@@ -81,13 +81,44 @@ type BridgeConfig struct {
 	BufferSize int // حجم الـ buffer للقنوات
 }
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لحجم الـ buffer
+	MaxBridgeBufferSize = 10000
+	// [SAFETY] الحد الأقصى لعدد الرسائل
+	MaxBridgeMessages = 10000
+	// [SAFETY] الحد الأقصى لحجم الرسالة (10MB)
+	MaxBridgeMessageSize = 10 * 1024 * 1024
+	// [SAFETY] الحد الأقصى لعدد الجسور
+	MaxBridges = 100
+)
+
 // NewSessionBridge ينشئ جسر جلسة جديد
 func NewSessionBridge(config *BridgeConfig, eventBus *eventbus.EventBus, logger *zap.Logger) *SessionBridge {
+	// [SAFETY] التحقق من صحة الإعدادات
+	if config == nil {
+		config = &BridgeConfig{}
+	}
+	if config.BridgeID == "" {
+		config.BridgeID = fmt.Sprintf("bridge_%d", time.Now().UnixNano())
+	}
+	if config.SourceID == "" {
+		config.SourceID = "unknown"
+	}
+	if config.TargetID == "" {
+		config.TargetID = "unknown"
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	bufferSize := config.BufferSize
 	if bufferSize == 0 {
 		bufferSize = 1000 // حجم افتراضي
+	}
+
+	// [SAFETY] التحقق من الحد الأقصى لحجم الـ buffer
+	if bufferSize > MaxBridgeBufferSize {
+		bufferSize = MaxBridgeBufferSize
 	}
 
 	return &SessionBridge{
@@ -155,11 +186,35 @@ func (sb *SessionBridge) Stop() error {
 
 // SendMessage يرسل رسالة عبر الجسر
 func (sb *SessionBridge) SendMessage(ctx context.Context, msg *BridgeMessage) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if msg == nil {
+		return fmt.Errorf("message cannot be nil")
+	}
+	if msg.From == "" {
+		return fmt.Errorf("message from cannot be empty")
+	}
+	if msg.To == "" {
+		return fmt.Errorf("message to cannot be empty")
+	}
+	if msg.Type == "" {
+		return fmt.Errorf("message type cannot be empty")
+	}
+
+	// [SAFETY] التحقق من الحد الأقصى لحجم الرسالة
+	if len(msg.Content) > MaxBridgeMessageSize {
+		return fmt.Errorf("message size too large (max %d bytes)", MaxBridgeMessageSize)
+	}
+
 	sb.mu.RLock()
 	defer sb.mu.RUnlock()
 
 	if sb.status != BridgeStatusActive {
 		return fmt.Errorf("جسر غير نشط: %s", sb.status)
+	}
+
+	// [SAFETY] التحقق من الحد الأقصى لعدد الرسائل
+	if sb.messagesSent >= MaxBridgeMessages {
+		return fmt.Errorf("maximum messages limit reached (%d)", MaxBridgeMessages)
 	}
 
 	msg.ID = fmt.Sprintf("msg_%d", time.Now().UnixNano())

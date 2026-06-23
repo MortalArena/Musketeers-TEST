@@ -14,6 +14,18 @@ type Aggregator struct {
 	mu        sync.RWMutex
 }
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لعدد القطع الأثرية
+	MaxArtifacts = 1000
+	// [SAFETY] الحد الأقصى للحجم الكلي (10GB)
+	MaxTotalSize = 10 * 1024 * 1024 * 1024
+	// [SAFETY] الحد الأقصى لعدد الملفات
+	MaxFiles = 10000
+	// [SAFETY] الحد الأقصى لعمق الشجرة
+	MaxTreeDepth = 20
+)
+
 // FinalArtifact المشروع النهائي
 type FinalArtifact struct {
 	SessionID   string     `json:"session_id"`
@@ -45,18 +57,28 @@ func (a *Aggregator) Aggregate(artifacts []Artifact) (*FinalArtifact, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	// [SAFETY] التحقق من صحة المدخلات
 	if len(artifacts) == 0 {
 		return nil, fmt.Errorf("لا توجد artifacts للتجميع")
 	}
 
-	// بناء شجرة الملفات
-	structure := a.buildFileTree(artifacts)
+	// [SAFETY] التحقق من الحد الأقصى للقطع الأثرية
+	if len(artifacts) > MaxArtifacts {
+		return nil, fmt.Errorf("maximum artifacts limit reached (%d)", MaxArtifacts)
+	}
 
-	// حساب الحجم الكلي
+	// [SAFETY] التحقق من الحد الأقصى للحجم الكلي
 	var totalSize int64
 	for _, artifact := range artifacts {
 		totalSize += artifact.Size
 	}
+
+	if totalSize > MaxTotalSize {
+		return nil, fmt.Errorf("maximum total size limit reached (%d bytes)", MaxTotalSize)
+	}
+
+	// بناء شجرة الملفات
+	structure := a.buildFileTree(artifacts)
 
 	final := &FinalArtifact{
 		SessionID: a.SessionID,

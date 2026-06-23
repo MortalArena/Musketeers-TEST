@@ -24,6 +24,22 @@ const (
 	PriorityUrgent TaskPriority = 4
 )
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لعدد المهام في قائمة الانتظار
+	MaxPendingTasks = 1000
+	// [SAFETY] الحد الأقصى لعدد المهام الجارية
+	MaxRunningTasks = 50
+	// [SAFETY] الحد الأقصى لمدة المهمة
+	MaxTaskTimeout = 24 * time.Hour
+	// [SAFETY] الحد الأقصى لعنوان المهمة
+	MaxTaskTitleLength = 200
+	// [SAFETY] الحد الأقصى لوصف المهمة
+	MaxTaskDescriptionLength = 2000
+	// [SAFETY] الحد الأقصى لعدد الوكلاء
+	MaxAgents = 100
+)
+
 // TaskStatus حالة المهمة
 type TaskStatus string
 
@@ -137,8 +153,33 @@ func (tm *TaskManager) SetEventBus(eb *eventbus.EventBus) {
 
 // CreateTask ينشئ مهمة جديدة
 func (tm *TaskManager) CreateTask(ctx context.Context, title, description string, priority TaskPriority, inputs map[string]interface{}, timeout time.Duration) (*ManagedTask, error) {
+	// [SAFETY] التحقق من صحة المدخلات
+	if title == "" {
+		return nil, fmt.Errorf("task title cannot be empty")
+	}
+	if len(title) > MaxTaskTitleLength {
+		return nil, fmt.Errorf("task title too long (max %d characters)", MaxTaskTitleLength)
+	}
+	if len(description) > MaxTaskDescriptionLength {
+		return nil, fmt.Errorf("task description too long (max %d characters)", MaxTaskDescriptionLength)
+	}
+	if priority < PriorityLow || priority > PriorityUrgent {
+		return nil, fmt.Errorf("invalid priority (must be between %d and %d)", PriorityLow, PriorityUrgent)
+	}
+	if timeout <= 0 {
+		return nil, fmt.Errorf("timeout must be positive")
+	}
+	if timeout > MaxTaskTimeout {
+		return nil, fmt.Errorf("timeout too long (max %v)", MaxTaskTimeout)
+	}
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى لقائمة الانتظار
+	if tm.pendingQueue.Len() >= MaxPendingTasks {
+		return nil, fmt.Errorf("maximum pending tasks limit reached (%d)", MaxPendingTasks)
+	}
 
 	task := &ManagedTask{
 		ID:          fmt.Sprintf("task_%s", uuid.New().String()),
@@ -176,8 +217,21 @@ func (tm *TaskManager) CreateTask(ctx context.Context, title, description string
 
 // AssignTask يعين مهمة لوكيل
 func (tm *TaskManager) AssignTask(ctx context.Context, taskID, agentID string) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if taskID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	if agentID == "" {
+		return fmt.Errorf("agent ID cannot be empty")
+	}
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للمهام الجارية
+	if len(tm.runningTasks) >= MaxRunningTasks {
+		return fmt.Errorf("maximum running tasks limit reached (%d)", MaxRunningTasks)
+	}
 
 	// البحث عن المهمة في قائمة الانتظار
 	var task *ManagedTask
@@ -440,9 +494,19 @@ func (tm *TaskManager) GetNextTask() *ManagedTask {
 }
 
 // RegisterAgent يسجل وكيل
-func (tm *TaskManager) RegisterAgent(agentID string, capabilities []agent.AgentCapability) {
+func (tm *TaskManager) RegisterAgent(agentID string, capabilities []agent.AgentCapability) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if agentID == "" {
+		return fmt.Errorf("agent ID cannot be empty")
+	}
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للوكلاء
+	if len(tm.agentStates) >= MaxAgents {
+		return fmt.Errorf("maximum agents limit reached (%d)", MaxAgents)
+	}
 
 	tm.agentStates[agentID] = &AgentState{
 		AgentID:      agentID,
@@ -471,6 +535,8 @@ func (tm *TaskManager) RegisterAgent(agentID string, capabilities []agent.AgentC
 			SessionID: tm.sessionID,
 		})
 	}
+
+	return nil
 }
 
 // UnregisterAgent يلغى تسجيل وكيل
@@ -559,9 +625,7 @@ func (tm *TaskManager) Save() ([]byte, error) {
 		AgentStates:    tm.agentStates,
 	}
 
-	for i, t := range *tm.pendingQueue {
-		data.PendingTasks[i] = t
-	}
+	copy(data.PendingTasks, *tm.pendingQueue)
 
 	return json.Marshal(data)
 }

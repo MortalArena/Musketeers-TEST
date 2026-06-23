@@ -14,10 +14,28 @@ type SkillsManager struct {
 	mu               sync.RWMutex
 }
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى للمستوى
+	MaxSkillLevel = 100
+	// [SAFETY] الحد الأدنى للمستوى
+	MinSkillLevel = 0
+	// [SAFETY] الحد الأقصى للخبرة
+	MaxExperience = 100000
+	// [SAFETY] الحد الأقصى لعدد المهارات لكل وكيل
+	MaxSkillsPerAgent = 50
+	// [SAFETY] الحد الأقصى لعدد المهارات الفرعية لكل مهارة
+	MaxSubSkillsPerSkill = 10
+	// [SAFETY] الحد الأقصى لمعدل النجاح
+	MaxSuccessRate = 1.0
+	// [SAFETY] الحد الأدنى لمعدل النجاح
+	MinSuccessRate = 0.0
+)
+
 // AgentSkill مهارات وكيل واحد
 type AgentSkill struct {
 	AgentDID        string            `json:"agent_did"`
-	AgentType       string            `json:"agent_type"` // coder, designer, tester, etc.
+	AgentType       string            `json:"agent_type"`    // coder, designer, tester, etc.
 	OverallLevel    int               `json:"overall_level"` // 0-100
 	Skills          map[string]*Skill `json:"skills"`
 	TotalTasks      int               `json:"total_tasks"`
@@ -33,7 +51,7 @@ type AgentSkill struct {
 // Skill مهارة محددة
 type Skill struct {
 	Name        string               `json:"name"`
-	Level       int                  `json:"level"` // 0-100
+	Level       int                  `json:"level"`      // 0-100
 	Experience  int                  `json:"experience"` // XP points
 	LastUsed    time.Time            `json:"last_used"`
 	UsageCount  int                  `json:"usage_count"`
@@ -69,8 +87,21 @@ func NewSkillsManager(sessionID string) *SkillsManager {
 
 // RegisterAgent يسجل وكيلاً ويمنحه مهارات ابتدائية
 func (sm *SkillsManager) RegisterAgent(agentDID, agentType string) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if agentDID == "" {
+		return fmt.Errorf("agent DID cannot be empty")
+	}
+	if agentType == "" {
+		return fmt.Errorf("agent type cannot be empty")
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للوكلاء
+	if len(sm.AgentSkills) >= MaxAgents {
+		return fmt.Errorf("maximum agents limit reached (%d)", MaxAgents)
+	}
 
 	if _, exists := sm.AgentSkills[agentDID]; exists {
 		return fmt.Errorf("الوكيل مسجل بالفعل")
@@ -109,6 +140,11 @@ func (sm *SkillsManager) RegisterAgent(agentDID, agentType string) error {
 		skill.Skills["penetration_testing"] = &Skill{Name: "Penetration Testing", Level: 80, Experience: 1500}
 		skill.Skills["code_audit"] = &Skill{Name: "Code Audit", Level: 85, Experience: 2000}
 		skill.Specializations = []string{"appsec", "infrastructure"}
+	}
+
+	// [SAFETY] التحقق من الحد الأقصى للمهارات
+	if len(skill.Skills) > MaxSkillsPerAgent {
+		return fmt.Errorf("maximum skills per agent limit reached (%d)", MaxSkillsPerAgent)
 	}
 
 	sm.AgentSkills[agentDID] = skill
@@ -174,7 +210,7 @@ func (sm *SkillsManager) checkMasteryBadges(skill *AgentSkill) {
 	for name, s := range skill.Skills {
 		if s.Level >= 90 {
 			badge := fmt.Sprintf("expert_%s", name)
-			if !contains(skill.MasteryBadges, badge) {
+			if !containsSlice(skill.MasteryBadges, badge) {
 				skill.MasteryBadges = append(skill.MasteryBadges, badge)
 			}
 		}
@@ -187,22 +223,27 @@ func (sm *SkillsManager) checkMasteryBadges(skill *AgentSkill) {
 			masterCount++
 		}
 	}
-	if masterCount >= 3 && !contains(skill.MasteryBadges, "master") {
+	if masterCount >= 3 && !containsSlice(skill.MasteryBadges, "master") {
 		skill.MasteryBadges = append(skill.MasteryBadges, "master")
 	}
 
 	// شارة "World-Class" - إذا وصل المستوى العام إلى 95+
-	if skill.OverallLevel >= 95 && !contains(skill.MasteryBadges, "world_class") {
+	if skill.OverallLevel >= 95 && !containsSlice(skill.MasteryBadges, "world_class") {
 		skill.MasteryBadges = append(skill.MasteryBadges, "world_class")
 	}
 }
 
 // calculateLevel يحسب المستوى من الخبرة
 func calculateLevel(experience int) int {
+	// [SAFETY] التحقق من الحد الأقصى للخبرة
+	if experience > MaxExperience {
+		experience = MaxExperience
+	}
+
 	// كل 100 XP = مستوى واحد
 	level := experience / 100
-	if level > 100 {
-		level = 100
+	if level > MaxSkillLevel {
+		level = MaxSkillLevel
 	}
 	return level
 }
@@ -243,8 +284,8 @@ func calculateOverallLevel(skill *AgentSkill) int {
 	return overall
 }
 
-// contains يتحقق من وجود عنصر في شريحة
-func contains(slice []string, item string) bool {
+// containsSlice يتحقق من وجود عنصر في شريحة
+func containsSlice(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {
 			return true

@@ -29,40 +29,40 @@ const (
 
 // Artifact قطعة أثرية (ملف أو بيانات)
 type Artifact struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Type        string                 `json:"type"` // file, data, url
-	Path        string                 `json:"path,omitempty"`
-	Data        []byte                 `json:"data,omitempty"`
-	Checksum    string                 `json:"checksum"`
-	Size        int64                  `json:"size"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	CreatedAt   time.Time              `json:"created_at"`
-	CreatedBy   string                 `json:"created_by"` // Agent ID
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Type      string                 `json:"type"` // file, data, url
+	Path      string                 `json:"path,omitempty"`
+	Data      []byte                 `json:"data,omitempty"`
+	Checksum  string                 `json:"checksum"`
+	Size      int64                  `json:"size"`
+	Metadata  map[string]interface{} `json:"metadata"`
+	CreatedAt time.Time              `json:"created_at"`
+	CreatedBy string                 `json:"created_by"` // Agent ID
 }
 
 // HandoffRequest طلب تسليم
 type HandoffRequest struct {
-	ID            string                 `json:"id"`
-	FromAgentID   string                 `json:"from_agent_id"`
-	ToAgentID     string                 `json:"to_agent_id"`
-	TaskID        string                 `json:"task_id"`
-	Artifacts     []Artifact             `json:"artifacts"`
-	Status        HandoffStatus          `json:"status"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
-	AcceptedAt    *time.Time             `json:"accepted_at,omitempty"`
-	RejectedAt    *time.Time             `json:"rejected_at,omitempty"`
-	CompletedAt   *time.Time             `json:"completed_at,omitempty"`
-	RejectReason  string                 `json:"reject_reason,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata"`
+	ID           string                 `json:"id"`
+	FromAgentID  string                 `json:"from_agent_id"`
+	ToAgentID    string                 `json:"to_agent_id"`
+	TaskID       string                 `json:"task_id"`
+	Artifacts    []Artifact             `json:"artifacts"`
+	Status       HandoffStatus          `json:"status"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	AcceptedAt   *time.Time             `json:"accepted_at,omitempty"`
+	RejectedAt   *time.Time             `json:"rejected_at,omitempty"`
+	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
+	RejectReason string                 `json:"reject_reason,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata"`
 }
 
 // HandoffManager مدير التسليم - يدير تسليم القطع الأثرية بين الوكلاء
 type HandoffManager struct {
-	sessionID string
-	logger    *zap.Logger
-	eventBus  *eventbus.EventBus
+	sessionID   string
+	logger      *zap.Logger
+	eventBus    *eventbus.EventBus
 	artifactDir string
 
 	// بيانات التسليم
@@ -71,14 +71,26 @@ type HandoffManager struct {
 	mu sync.RWMutex
 }
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لعدد طلبات التسليم
+	MaxHandoffs = 1000
+	// [SAFETY] الحد الأقصى لعدد القطع الأثرية لكل طلب
+	MaxArtifactsPerHandoff = 100
+	// [SAFETY] الحد الأقصى لحجم القطعة الأثرية (100MB)
+	MaxArtifactSize = 100 * 1024 * 1024
+	// [SAFETY] الحد الأقصى لاسم القطعة الأثرية
+	MaxArtifactNameLength = 200
+)
+
 // NewHandoffManager ينشئ مدير تسليم جديد
 func NewHandoffManager(sessionID, artifactDir string) *HandoffManager {
 	return &HandoffManager{
-		sessionID:    sessionID,
-		logger:       zap.NewNop(), // سيتم استبداله بـ logger حقيقي
-		eventBus:     nil,          // سيتم تعيينه لاحقاً
-		artifactDir:  artifactDir,
-		handoffs:     make(map[string]*HandoffRequest),
+		sessionID:   sessionID,
+		logger:      zap.NewNop(), // سيتم استبداله بـ logger حقيقي
+		eventBus:    nil,          // سيتم تعيينه لاحقاً
+		artifactDir: artifactDir,
+		handoffs:    make(map[string]*HandoffRequest),
 	}
 }
 
@@ -98,8 +110,45 @@ func (hm *HandoffManager) SetEventBus(eb *eventbus.EventBus) {
 
 // CreateHandoffRequest ينشئ طلب تسليم جديد
 func (hm *HandoffManager) CreateHandoffRequest(ctx context.Context, fromAgentID, toAgentID, taskID string, artifacts []Artifact) (*HandoffRequest, error) {
+	// [SAFETY] التحقق من صحة المدخلات
+	if fromAgentID == "" {
+		return nil, fmt.Errorf("from agent ID cannot be empty")
+	}
+	if toAgentID == "" {
+		return nil, fmt.Errorf("to agent ID cannot be empty")
+	}
+	if taskID == "" {
+		return nil, fmt.Errorf("task ID cannot be empty")
+	}
+
+	// [SAFETY] التحقق من الحد الأقصى للقطع الأثرية
+	if len(artifacts) > MaxArtifactsPerHandoff {
+		return nil, fmt.Errorf("maximum artifacts per handoff limit reached (%d)", MaxArtifactsPerHandoff)
+	}
+
+	// [SAFETY] التحقق من صحة القطع الأثرية
+	for i := range artifacts {
+		if artifacts[i].Name == "" {
+			return nil, fmt.Errorf("artifact name cannot be empty")
+		}
+		if len(artifacts[i].Name) > MaxArtifactNameLength {
+			return nil, fmt.Errorf("artifact name too long (max %d characters)", MaxArtifactNameLength)
+		}
+		if artifacts[i].Type == "" {
+			return nil, fmt.Errorf("artifact type cannot be empty")
+		}
+		if int64(len(artifacts[i].Data)) > MaxArtifactSize {
+			return nil, fmt.Errorf("artifact size too large (max %d bytes)", MaxArtifactSize)
+		}
+	}
+
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى لطلبات التسليم
+	if len(hm.handoffs) >= MaxHandoffs {
+		return nil, fmt.Errorf("maximum handoffs limit reached (%d)", MaxHandoffs)
+	}
 
 	// حساب checksum لكل قطعة أثرية
 	for i := range artifacts {
@@ -468,8 +517,8 @@ func (hm *HandoffManager) CleanupOldHandoffs(ctx context.Context, olderThan time
 	deletedCount := 0
 
 	for id, request := range hm.handoffs {
-		if request.UpdatedAt.Before(cutoff) && 
-		   (request.Status == HandoffStatusCompleted || request.Status == HandoffStatusRejected || request.Status == HandoffStatusFailed) {
+		if request.UpdatedAt.Before(cutoff) &&
+			(request.Status == HandoffStatusCompleted || request.Status == HandoffStatusRejected || request.Status == HandoffStatusFailed) {
 			delete(hm.handoffs, id)
 			deletedCount++
 		}

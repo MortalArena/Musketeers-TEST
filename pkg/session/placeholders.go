@@ -15,6 +15,12 @@ type ArtifactsStore struct {
 	mu        sync.RWMutex
 }
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لعدد القطع الأثرية في المخزن
+	MaxArtifactsInStore = 1000
+)
+
 // NewArtifactsStore ينشئ مخزن قطع أثرية جديد
 func NewArtifactsStore(sessionID string, db *badger.DB) *ArtifactsStore {
 	return &ArtifactsStore{
@@ -26,8 +32,24 @@ func NewArtifactsStore(sessionID string, db *badger.DB) *ArtifactsStore {
 
 // AddArtifact يضيف قطعة أثرية
 func (as *ArtifactsStore) AddArtifact(artifact *Artifact) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if artifact == nil {
+		return fmt.Errorf("artifact cannot be nil")
+	}
+	if artifact.ID == "" {
+		return fmt.Errorf("artifact ID cannot be empty")
+	}
+	if artifact.Name == "" {
+		return fmt.Errorf("artifact name cannot be empty")
+	}
+
 	as.mu.Lock()
 	defer as.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للقطع الأثرية
+	if len(as.artifacts) >= MaxArtifactsInStore {
+		return fmt.Errorf("maximum artifacts limit reached (%d)", MaxArtifactsInStore)
+	}
 
 	as.artifacts[artifact.ID] = artifact
 	return nil

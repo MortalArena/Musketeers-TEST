@@ -16,6 +16,18 @@ type UnifiedSessionManager struct {
 	mu       sync.RWMutex
 }
 
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لعدد الجلسات
+	MaxSessions = 100
+	// [SAFETY] الحد الأقصى لعدد العملاء البشريين لكل جلسة
+	MaxHumanClientsPerSession = 50
+	// [SAFETY] الحد الأقصى لعدد نسخ الوكلاء لكل جلسة
+	MaxAgentInstancesPerSession = 20
+	// [SAFETY] الحد الأقصى لاسم الجلسة
+	MaxSessionNameLength = 200
+)
+
 // SessionInfo معلومات الجلسة
 type SessionInfo struct {
 	ID              string
@@ -78,8 +90,27 @@ func NewUnifiedSessionManager(logger *zap.Logger) *UnifiedSessionManager {
 
 // CreateSession ينشئ جلسة جديدة
 func (usm *UnifiedSessionManager) CreateSession(ctx context.Context, name, ownerDID string, managerAgentID string, assistantAgents []string) (*SessionInfo, error) {
+	// [SAFETY] التحقق من صحة المدخلات
+	if name == "" {
+		return nil, fmt.Errorf("session name cannot be empty")
+	}
+	if len(name) > MaxSessionNameLength {
+		return nil, fmt.Errorf("session name too long (max %d characters)", MaxSessionNameLength)
+	}
+	if ownerDID == "" {
+		return nil, fmt.Errorf("owner DID cannot be empty")
+	}
+	if managerAgentID == "" {
+		return nil, fmt.Errorf("manager agent ID cannot be empty")
+	}
+
 	usm.mu.Lock()
 	defer usm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للجلسات
+	if len(usm.sessions) >= MaxSessions {
+		return nil, fmt.Errorf("maximum sessions limit reached (%d)", MaxSessions)
+	}
 
 	sessionID := fmt.Sprintf("sess_%d", time.Now().UnixNano())
 
@@ -260,12 +291,28 @@ func (usm *UnifiedSessionManager) GetSummary() map[string]interface{} {
 
 // RegisterHumanClient يسجل عميل بشري في الجلسة
 func (usm *UnifiedSessionManager) RegisterHumanClient(sessionID, userID, name, device, location string) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if sessionID == "" {
+		return fmt.Errorf("session ID cannot be empty")
+	}
+	if userID == "" {
+		return fmt.Errorf("user ID cannot be empty")
+	}
+	if name == "" {
+		return fmt.Errorf("name cannot be empty")
+	}
+
 	usm.mu.Lock()
 	defer usm.mu.Unlock()
 
 	session, exists := usm.sessions[sessionID]
 	if !exists {
 		return fmt.Errorf("الجلسة %s غير موجودة", sessionID)
+	}
+
+	// [SAFETY] التحقق من الحد الأقصى للعملاء البشريين
+	if len(session.HumanClients) >= MaxHumanClientsPerSession {
+		return fmt.Errorf("maximum human clients per session limit reached (%d)", MaxHumanClientsPerSession)
 	}
 
 	if session.HumanClients == nil {
@@ -296,12 +343,37 @@ func (usm *UnifiedSessionManager) RegisterHumanClient(sessionID, userID, name, d
 
 // RegisterAgentInstance يسجل نسخة وكيل في الجلسة
 func (usm *UnifiedSessionManager) RegisterAgentInstance(sessionID, agentID, instanceID, humanClientID, humanClientName, provider, model, apiKeyID, apiKeyLabel, role string) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if sessionID == "" {
+		return fmt.Errorf("session ID cannot be empty")
+	}
+	if agentID == "" {
+		return fmt.Errorf("agent ID cannot be empty")
+	}
+	if instanceID == "" {
+		return fmt.Errorf("instance ID cannot be empty")
+	}
+	if provider == "" {
+		return fmt.Errorf("provider cannot be empty")
+	}
+	if model == "" {
+		return fmt.Errorf("model cannot be empty")
+	}
+	if role == "" {
+		return fmt.Errorf("role cannot be empty")
+	}
+
 	usm.mu.Lock()
 	defer usm.mu.Unlock()
 
 	session, exists := usm.sessions[sessionID]
 	if !exists {
 		return fmt.Errorf("الجلسة %s غير موجودة", sessionID)
+	}
+
+	// [SAFETY] التحقق من الحد الأقصى لنسخ الوكلاء
+	if len(session.AgentInstances) >= MaxAgentInstancesPerSession {
+		return fmt.Errorf("maximum agent instances per session limit reached (%d)", MaxAgentInstancesPerSession)
 	}
 
 	if session.AgentInstances == nil {

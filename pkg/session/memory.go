@@ -14,10 +14,10 @@ type CollectiveMemory struct {
 	SessionID string `json:"session_id"`
 
 	// 4 أنواع من الذاكرة
-	Episodic   []MemoryEvent    `json:"episodic"`    // أحداث (ماذا حدث؟)
-	Semantic   []MemoryFact     `json:"semantic"`    // حقائق (ماذا نعرف؟)
-	Procedural []MemoryWorkflow `json:"procedural"`  // طرق (كيف نفعل؟)
-	Meta       []MemoryStrategy `json:"meta"`        // استراتيجيات (كيف نفكر؟)
+	Episodic   []MemoryEvent    `json:"episodic"`   // أحداث (ماذا حدث؟)
+	Semantic   []MemoryFact     `json:"semantic"`   // حقائق (ماذا نعرف؟)
+	Procedural []MemoryWorkflow `json:"procedural"` // طرق (كيف نفعل؟)
+	Meta       []MemoryStrategy `json:"meta"`       // استراتيجيات (كيف نفكر؟)
 
 	// إحصائيات
 	TotalEvents     int `json:"total_events"`
@@ -28,6 +28,22 @@ type CollectiveMemory struct {
 	DB *badger.DB
 	mu sync.RWMutex
 }
+
+// [SAFETY] حدود الموارد لمنع استهلاك غير محدود
+const (
+	// [SAFETY] الحد الأقصى لعدد الأحداث
+	MaxEpisodicEvents = 10000
+	// [SAFETY] الحد الأقصى لعدد الحقائق
+	MaxSemanticFacts = 5000
+	// [SAFETY] الحد الأقصى لعدد الورك فلو
+	MaxProceduralWorkflows = 1000
+	// [SAFETY] الحد الأقصى لعدد الاستراتيجيات
+	MaxMetaStrategies = 500
+	// [SAFETY] الحد الأقصى لقيمة الثقة
+	MaxConfidence = 1.0
+	// [SAFETY] الحد الأدنى لقيمة الثقة
+	MinConfidence = 0.0
+)
 
 // MemoryEvent حدث في الذاكرة العرضية
 type MemoryEvent struct {
@@ -102,8 +118,27 @@ func NewCollectiveMemory(sessionID string, db *badger.DB) *CollectiveMemory {
 
 // RecordEvent يسجل حدثاً في الذاكرة العرضية
 func (cm *CollectiveMemory) RecordEvent(event MemoryEvent) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if event.AgentDID == "" {
+		return fmt.Errorf("agent DID cannot be empty")
+	}
+	if event.Action == "" {
+		return fmt.Errorf("action cannot be empty")
+	}
+	if event.Outcome == "" {
+		return fmt.Errorf("outcome cannot be empty")
+	}
+	if event.Confidence < MinConfidence || event.Confidence > MaxConfidence {
+		return fmt.Errorf("confidence must be between %.1f and %.1f", MinConfidence, MaxConfidence)
+	}
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للأحداث
+	if len(cm.Episodic) >= MaxEpisodicEvents {
+		return fmt.Errorf("maximum episodic events limit reached (%d)", MaxEpisodicEvents)
+	}
 
 	event.ID = fmt.Sprintf("evt_%d", len(cm.Episodic)+1)
 	event.Timestamp = time.Now()
@@ -119,8 +154,24 @@ func (cm *CollectiveMemory) RecordEvent(event MemoryEvent) error {
 
 // LearnFact يتعلم حقيقة جديدة في الذاكرة الدلالية
 func (cm *CollectiveMemory) LearnFact(fact MemoryFact) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if fact.Statement == "" {
+		return fmt.Errorf("statement cannot be empty")
+	}
+	if fact.Category == "" {
+		return fmt.Errorf("category cannot be empty")
+	}
+	if fact.Confidence < MinConfidence || fact.Confidence > MaxConfidence {
+		return fmt.Errorf("confidence must be between %.1f and %.1f", MinConfidence, MaxConfidence)
+	}
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للحقائق
+	if len(cm.Semantic) >= MaxSemanticFacts {
+		return fmt.Errorf("maximum semantic facts limit reached (%d)", MaxSemanticFacts)
+	}
 
 	// التحقق من عدم التكرار
 	for i, existing := range cm.Semantic {
@@ -149,8 +200,21 @@ func (cm *CollectiveMemory) LearnFact(fact MemoryFact) error {
 
 // DiscoverWorkflow يكتشف workflow جديد في الذاكرة الإجرائية
 func (cm *CollectiveMemory) DiscoverWorkflow(workflow MemoryWorkflow) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if workflow.Name == "" {
+		return fmt.Errorf("workflow name cannot be empty")
+	}
+	if workflow.SuccessRate < MinConfidence || workflow.SuccessRate > MaxConfidence {
+		return fmt.Errorf("success rate must be between %.1f and %.1f", MinConfidence, MaxConfidence)
+	}
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للورك فلو
+	if len(cm.Procedural) >= MaxProceduralWorkflows {
+		return fmt.Errorf("maximum procedural workflows limit reached (%d)", MaxProceduralWorkflows)
+	}
 
 	workflow.ID = fmt.Sprintf("wf_%d", len(cm.Procedural)+1)
 	workflow.CreatedAt = time.Now()
@@ -166,8 +230,27 @@ func (cm *CollectiveMemory) DiscoverWorkflow(workflow MemoryWorkflow) error {
 
 // DevelopStrategy يطور استراتيجية جديدة في الذاكرة الوصفية
 func (cm *CollectiveMemory) DevelopStrategy(strategy MemoryStrategy) error {
+	// [SAFETY] التحقق من صحة المدخلات
+	if strategy.Name == "" {
+		return fmt.Errorf("strategy name cannot be empty")
+	}
+	if strategy.WhenToUse == "" {
+		return fmt.Errorf("when to use cannot be empty")
+	}
+	if strategy.HowToUse == "" {
+		return fmt.Errorf("how to use cannot be empty")
+	}
+	if strategy.Effectiveness < MinConfidence || strategy.Effectiveness > MaxConfidence {
+		return fmt.Errorf("effectiveness must be between %.1f and %.1f", MinConfidence, MaxConfidence)
+	}
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	// [SAFETY] التحقق من الحد الأقصى للاستراتيجيات
+	if len(cm.Meta) >= MaxMetaStrategies {
+		return fmt.Errorf("maximum meta strategies limit reached (%d)", MaxMetaStrategies)
+	}
 
 	strategy.ID = fmt.Sprintf("strat_%d", len(cm.Meta)+1)
 	strategy.CreatedAt = time.Now()
