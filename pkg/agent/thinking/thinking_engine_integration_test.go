@@ -234,10 +234,16 @@ func TestThinkingEngineSkillsIntegration(t *testing.T) {
 	mockSkills := &MockSkillsManager{}
 	te.SetSkillsManager(mockSkills)
 
+	// تسجيل الوكيل أولاً
+	regErr := mockSkills.RegisterAgent("agent-1", "test-type")
+	if regErr != nil {
+		t.Fatalf("فشل تسجيل الوكيل: %v", regErr)
+	}
+
 	// اختبار التعلم من مهارة
-	err := te.LearnFromSkill(ctx, "coding", true, time.Second*10)
-	if err != nil {
-		t.Fatalf("فشل التعلم من المهارة: %v", err)
+	learnErr := te.LearnFromSkill(ctx, "coding", true, time.Second*10)
+	if learnErr != nil {
+		t.Fatalf("فشل التعلم من المهارة: %v", learnErr)
 	}
 
 	// اختبار الحصول على مستوى المهارة
@@ -263,6 +269,9 @@ func TestThinkingEngineBridgeIntegration(t *testing.T) {
 	// ربط مدير الجسور
 	mockBridgeManager := &MockBridgeManager{}
 	te.SetBridgeManager(mockBridgeManager)
+
+	// إضافة صلاحية إنشاء الجسور
+	te.SetSessionPermissions([]string{"create_bridge"})
 
 	// اختبار إنشاء جسر
 	err := te.BridgeToSession(ctx, "target-session", "two_way")

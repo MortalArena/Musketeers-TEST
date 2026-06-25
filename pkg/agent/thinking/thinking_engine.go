@@ -1318,16 +1318,18 @@ func (te *ThinkingEngine) GetSessionPermissions() []string {
 
 // CheckPermission يتحقق من صلاحية معينة
 func (te *ThinkingEngine) CheckPermission(ctx context.Context, permission string) bool {
-	te.mu.RLock()
-	defer te.mu.RUnlock()
+	// استخدام atomic reads لتجنب deadlock
+	isManager := te.isSessionManager
+	permissions := make([]string, len(te.sessionPermissions))
+	copy(permissions, te.sessionPermissions)
 
 	// إذا كان وكيل مدير الجلسة، لديه جميع الصلاحيات
-	if te.isSessionManager {
+	if isManager {
 		return true
 	}
 
 	// التحقق من الصلاحيات المباشرة
-	for _, perm := range te.sessionPermissions {
+	for _, perm := range permissions {
 		if perm == permission {
 			return true
 		}
@@ -1943,7 +1945,8 @@ func (te *ThinkingEngine) UnderstandSessionEnvironment(ctx context.Context) (map
 		"session_container": te.sessionContainer != nil,
 	}
 
-	te.AddThought(ctx, PhaseAnalysis, "فهم البيئة الكاملة للجلسة", map[string]interface{}{
+	// إضافة فكرة بدون قفل
+	te.addThoughtInternal(PhaseAnalysis, "فهم البيئة الكاملة للجلسة", map[string]interface{}{
 		"peer_agents_count":   len(te.peerAgents),
 		"active_models_count": len(te.activeModels),
 	})
@@ -1977,7 +1980,8 @@ func (te *ThinkingEngine) RememberEvent(ctx context.Context, action string, cont
 		return fmt.Errorf("فشل تسجيل الحدث: %w", err)
 	}
 
-	te.AddThought(ctx, PhaseReflection, fmt.Sprintf("تسجيل حدث: %s", action), map[string]interface{}{
+	// إضافة فكرة بدون قفل
+	te.addThoughtInternal(PhaseReflection, fmt.Sprintf("تسجيل حدث: %s", action), map[string]interface{}{
 		"action":  action,
 		"outcome": outcome,
 		"lessons": lessons,
@@ -2033,7 +2037,8 @@ func (te *ThinkingEngine) LearnFromSkill(ctx context.Context, skillName string, 
 		return fmt.Errorf("فشل تحديث المهارة: %w", err)
 	}
 
-	te.AddThought(ctx, PhaseReflection, fmt.Sprintf("التعلم من المهارة: %s", skillName), map[string]interface{}{
+	// إضافة فكرة بدون قفل
+	te.addThoughtInternal(PhaseReflection, fmt.Sprintf("التعلم من المهارة: %s", skillName), map[string]interface{}{
 		"skill":    skillName,
 		"success":  success,
 		"duration": duration,
@@ -2088,7 +2093,8 @@ func (te *ThinkingEngine) BridgeToSession(ctx context.Context, targetSessionID, 
 	// تعيين الجسر الحالي
 	te.sessionBridge = bridge
 
-	te.AddThought(ctx, PhaseExecution, fmt.Sprintf("إنشاء جسر للجلسة: %s", targetSessionID), map[string]interface{}{
+	// إضافة فكرة بدون قفل
+	te.addThoughtInternal(PhaseExecution, fmt.Sprintf("إنشاء جسر للجلسة: %s", targetSessionID), map[string]interface{}{
 		"target_session": targetSessionID,
 		"bridge_type":    bridgeType,
 		"bridge_id":      bridge.ID,
@@ -2123,7 +2129,8 @@ func (te *ThinkingEngine) SendBridgeMessage(ctx context.Context, bridgeID, messa
 		return fmt.Errorf("فشل إرسال الرسالة: %w", err)
 	}
 
-	te.AddThought(ctx, PhaseExecution, fmt.Sprintf("إرسال رسالة عبر الجسر: %s", bridgeID), map[string]interface{}{
+	// إضافة فكرة بدون قفل
+	te.addThoughtInternal(PhaseExecution, fmt.Sprintf("إرسال رسالة عبر الجسر: %s", bridgeID), map[string]interface{}{
 		"bridge_id":    bridgeID,
 		"message_type": messageType,
 		"content":      content,
@@ -2166,7 +2173,8 @@ func (te *ThinkingEngine) JoinSession(ctx context.Context, sessionID, role strin
 		te.sessionManagerAgent = te.agentID
 	}
 
-	te.AddThought(ctx, PhaseAnalysis, fmt.Sprintf("الانضمام للجلسة: %s كـ %s", sessionID, role), map[string]interface{}{
+	// إضافة فكرة بدون قفل
+	te.addThoughtInternal(PhaseAnalysis, fmt.Sprintf("الانضمام للجلسة: %s كـ %s", sessionID, role), map[string]interface{}{
 		"session_id": sessionID,
 		"role":       role,
 	})
@@ -2179,7 +2187,8 @@ func (te *ThinkingEngine) LeaveSession(ctx context.Context) error {
 	te.mu.Lock()
 	defer te.mu.Unlock()
 
-	te.AddThought(ctx, PhaseAnalysis, "مغادرة الجلسة", map[string]interface{}{
+	// إضافة فكرة بدون قفل
+	te.addThoughtInternal(PhaseAnalysis, "مغادرة الجلسة", map[string]interface{}{
 		"session_id": te.sessionID,
 	})
 
@@ -2233,6 +2242,22 @@ func (te *ThinkingEngine) AddThought(ctx context.Context, phase ThinkingPhase, c
 		zap.String("phase", string(phase)),
 		zap.String("thought_id", thought.ID),
 	)
+
+	return nil
+}
+
+// addThoughtInternal يضيف فكرة بدون قفل (thread-unsafe)
+func (te *ThinkingEngine) addThoughtInternal(phase ThinkingPhase, content string, metadata map[string]interface{}) error {
+	thought := &Thought{
+		ID:        fmt.Sprintf("thought_%d", time.Now().UnixNano()),
+		Phase:     phase,
+		Content:   content,
+		Timestamp: time.Now(),
+		Metadata:  metadata,
+	}
+
+	te.thoughts = append(te.thoughts, thought)
+	te.currentPhase = phase
 
 	return nil
 }
