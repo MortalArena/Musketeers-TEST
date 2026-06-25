@@ -263,6 +263,8 @@ func NewSessionContainer(ctx context.Context, db *badger.DB, config *SessionConf
 	session.Memory = NewCollectiveMemory(session.ID, db)
 	session.Skills = NewSkillsManager(session.ID)
 	session.Workflow = NewWorkflowEngine(session.ID)
+	// ربط WorkflowEngine بـ SessionContainer للتكامل
+	session.Workflow.SetSessionContainer(session)
 	session.Artifacts = NewArtifactsStore(session.ID, db)
 	session.Tasks = NewTaskManager(session.ID)
 	session.Progress = NewProgressTracker(session.ID)
@@ -501,10 +503,10 @@ func (s *SessionContainer) AddTask(taskID, title, assignedTo, priority string) e
 
 	// تسجيل في سجل الأحداث
 	s.Journal.Append(JournalTaskCreated, assignedTo, "agent", "تم إنشاء مهمة: "+title, map[string]interface{}{
-		"task_id":    taskID,
-		"title":      title,
-		"assigned":   assignedTo,
-		"priority":   priority,
+		"task_id":  taskID,
+		"title":    title,
+		"assigned": assignedTo,
+		"priority": priority,
 	})
 
 	return nil
@@ -640,9 +642,9 @@ func (s *SessionContainer) ReplaceRemoteState(remote UnifiedSessionState) {
 	s.updateProgress()
 
 	s.Journal.Append(JournalStateChanged, "remote", "node", "تم تحديث الحالة من جهاز بعيد", map[string]interface{}{
-		"remote_agents":    len(remote.Agents),
-		"remote_tasks":     len(remote.Tasks),
-		"remote_progress":  remote.Progress.Percentage,
+		"remote_agents":   len(remote.Agents),
+		"remote_tasks":    len(remote.Tasks),
+		"remote_progress": remote.Progress.Percentage,
 	})
 }
 
@@ -673,12 +675,12 @@ func (s *SessionContainer) updateProgress() {
 
 // SessionExportData يحتوي على جميع بيانات الجلسة للتصدير
 type SessionExportData struct {
-	SessionContainer *SessionContainer       `json:"session_container"`
-	State            UnifiedSessionState     `json:"state"`
-	JournalEntries   []JournalEntry          `json:"journal_entries,omitempty"` // [NEW] سجل الأحداث الكامل
-	ExportedAt       time.Time               `json:"exported_at"`
-	ExporterDID      string                  `json:"exporter_did"`
-	Delegation       string                  `json:"delegation,omitempty"` // توقيع التفويض للاستيراد
+	SessionContainer *SessionContainer   `json:"session_container"`
+	State            UnifiedSessionState `json:"state"`
+	JournalEntries   []JournalEntry      `json:"journal_entries,omitempty"` // [NEW] سجل الأحداث الكامل
+	ExportedAt       time.Time           `json:"exported_at"`
+	ExporterDID      string              `json:"exporter_did"`
+	Delegation       string              `json:"delegation,omitempty"` // توقيع التفويض للاستيراد
 }
 
 // Export يُصدّر الجلسة كاملة (للنقل بين الأجهزة)

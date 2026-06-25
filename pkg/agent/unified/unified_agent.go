@@ -13,6 +13,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/agent/thinking"
 	"github.com/MortalArena/Musketeers/pkg/agent/tools"
 	"github.com/MortalArena/Musketeers/pkg/agent/validation"
+	"github.com/MortalArena/Musketeers/pkg/agent/wiring"
 	"github.com/MortalArena/Musketeers/pkg/providers"
 	"github.com/MortalArena/Musketeers/pkg/session"
 	"github.com/dgraph-io/badger/v4"
@@ -78,6 +79,15 @@ type UnifiedAgent struct {
 	// ThinkingEngine initialization flag
 	thinkingEngineInitialized bool
 
+	// [NEW] WiringLayer for automatic adapter connection
+	wiringLayer *wiring.WiringLayer
+
+	// SessionContainer reference for integration
+	sessionContainer *session.SessionContainer
+
+	// SessionManager for session management
+	sessionManager *SessionManager
+
 	logger *zap.Logger
 	mu     sync.RWMutex
 }
@@ -129,9 +139,22 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 	// إنشاء مجدول المهام
 	ua.taskScheduler = NewTaskScheduler(sessionID, logger)
 
+	// إنشاء SessionManager للتكامل الكامل
+	ua.sessionManager = NewSessionManager(sessionID, logger)
+
+	// إنشاء ProviderRegistry و Router
+	ua.providerRegistry = providers.NewProviderRegistry()
+	ua.router = providers.NewRouter(ua.providerRegistry, providers.RouterConfig{})
+
+	// إنشاء ToolExecutor
+	ua.toolExecutor = tools.NewToolExecutor(sessionID, logger)
+
 	// إنشاء ThinkingEngine للتفكير العميق
 	ua.thinkingEngine = thinking.NewThinkingEngine(sessionID, agentID, logger)
 	ua.thinkingEngineInitialized = true
+
+	// إنشاء WiringLayer للربط التلقائي للـ Adapters
+	ua.wiringLayer = wiring.NewWiringLayer(sessionID, agentID, logger)
 
 	// إنشاء مدير المزامنة
 	ua.syncManager = NewAgentSyncManager(
@@ -203,6 +226,17 @@ func (ua *UnifiedAgent) Initialize(ctx context.Context) error {
 	// بدء تنظيف البيانات الدوري
 	go ua.startDataCuration(ctx)
 
+	// تهيئة SessionManager مع AgentExecutor
+	if err := ua.sessionManager.Initialize(ctx, ua); err != nil {
+		ua.logger.Warn("فشل تهيئة SessionManager", zap.Error(err))
+	}
+
+	// ربط ThinkingEngine بـ SessionManager
+	if ua.thinkingEngine != nil && ua.sessionManager != nil {
+		ua.thinkingEngine.SetSessionManager(ua.sessionManager)
+		ua.logger.Info("تم ربط ThinkingEngine بـ SessionManager")
+	}
+
 	// ربط ThinkingEngine بمكونات session الحقيقية عبر adaptors
 	if err := ua.connectThinkingEngineToSession(ctx); err != nil {
 		ua.logger.Warn("فشل ربط ThinkingEngine بمكونات session", zap.Error(err))
@@ -250,6 +284,17 @@ func (ua *UnifiedAgent) connectThinkingEngineToSession(ctx context.Context) erro
 	}
 	sessionContainer, err := session.NewSessionContainer(ctx, nil, sessionConfig, nil)
 	if err == nil && sessionContainer != nil {
+		// حفظ مرجع للـ SessionContainer في UnifiedAgent
+		ua.sessionContainer = sessionContainer
+
+		// ربط SessionJournal مع ThinkingEngine
+		if sessionContainer.Journal != nil {
+			sessionJournalAdaptor := thinking.NewSessionJournalAdaptor(sessionContainer.Journal)
+			ua.thinkingEngine.SetSessionJournal(sessionJournalAdaptor)
+			ua.logger.Info("ربط ThinkingEngine بـ SessionJournal عبر adaptor")
+		}
+
+		// ربط SessionContainer مع ThinkingEngine
 		sessionContainerAdaptor := thinking.NewSessionContainerAdaptor(sessionContainer)
 		ua.thinkingEngine.SetSessionContainer(sessionContainerAdaptor)
 		ua.logger.Info("ربط ThinkingEngine بـ SessionContainer عبر adaptor")
@@ -286,10 +331,17 @@ func (ua *UnifiedAgent) connectThinkingEngineToSession(ctx context.Context) erro
 		ua.logger.Info("ربط ThinkingEngine بـ SessionEventBus عبر adaptor للمزامنة اللحظية للأحداث")
 	}
 
-	// ربط نظام الورك فلو عبر adaptor (محاكاة بسيطة)
-	workflowAdaptor := thinking.NewWorkflowAdaptor(nil)
-	ua.thinkingEngine.SetWorkflow(workflowAdaptor)
-	ua.logger.Info("ربط ThinkingEngine بـ Workflow عبر adaptor")
+	// ربط نظام الورك فلو الحقيقي من pkg/session/workflow.go
+	if sessionContainer != nil && sessionContainer.Workflow != nil {
+		// ربط WorkflowEngine الحقيقي مع ThinkingEngine
+		ua.thinkingEngine.SetWorkflowEngine(sessionContainer.Workflow)
+		ua.logger.Info("ربط ThinkingEngine بـ WorkflowEngine الحقيقي من pkg/session/workflow.go")
+	} else {
+		// استخدام adaptor كحل احتياطي
+		workflowAdaptor := thinking.NewWorkflowAdaptor(nil)
+		ua.thinkingEngine.SetWorkflow(workflowAdaptor)
+		ua.logger.Info("ربط ThinkingEngine بـ Workflow عبر adaptor (احتياطي)")
+	}
 
 	// ربط مدير المهام عبر adaptor (محاكاة بسيطة)
 	sessionTaskManager := session.NewTaskManager(ua.sessionID)
@@ -312,7 +364,103 @@ func (ua *UnifiedAgent) connectThinkingEngineToSession(ctx context.Context) erro
 	ua.thinkingEngine.SetGeoLocationAware(geoLocationAwareAdaptor)
 	ua.logger.Info("ربط ThinkingEngine بـ GeoLocationAware عبر adaptor للبيئة الموزعة")
 
+	// ربط RuntimeIntegration مع ToolExecutor
+	if ua.toolExecutor != nil {
+		ua.thinkingEngine.SetRuntimeIntegrationToolExecutor(ua.toolExecutor)
+		ua.logger.Info("ربط RuntimeIntegration بـ ToolExecutor")
+	}
+
 	ua.logger.Info("تم ربط ThinkingEngine بجميع مكونات session الحقيقية عبر adaptors")
+
+	// [NEW] استخدام WiringLayer للربط التلقائي للـ Adapters
+	if err := ua.useWiringLayer(ctx); err != nil {
+		ua.logger.Warn("فشل استخدام WiringLayer للربط التلقائي", zap.Error(err))
+		// لا نرجع خطأ لأن هذا ليس حرجاً للتهيئة
+	}
+
+	return nil
+}
+
+// useWiringLayer يستخدم WiringLayer للربط التلقائي للـ Adapters
+func (ua *UnifiedAgent) useWiringLayer(ctx context.Context) error {
+	if ua.wiringLayer == nil {
+		return fmt.Errorf("WiringLayer not initialized")
+	}
+
+	ua.logger.Info("بدء استخدام WiringLayer للربط التلقائي")
+
+	// تسجيل Adapters الرئيسية باستخدام wrappers
+	if ua.thinkingEngine != nil {
+		thinkingAdapter := wiring.NewThinkingEngineAdapter(ua.thinkingEngine, ua.logger)
+		if err := ua.wiringLayer.RegisterAdapter(thinkingAdapter); err != nil {
+			ua.logger.Warn("فشل تسجيل ThinkingEngine Adapter", zap.Error(err))
+		}
+	}
+
+	if ua.sessionManager != nil {
+		sessionAdapter := wiring.NewSessionManagerAdapter(ua.sessionManager, ua.logger)
+		if err := ua.wiringLayer.RegisterAdapter(sessionAdapter); err != nil {
+			ua.logger.Warn("فشل تسجيل SessionManager Adapter", zap.Error(err))
+		}
+	}
+
+	if ua.toolExecutor != nil {
+		toolAdapter := wiring.NewToolExecutorAdapter(ua.toolExecutor, ua.logger)
+		if err := ua.wiringLayer.RegisterAdapter(toolAdapter); err != nil {
+			ua.logger.Warn("فشل تسجيل ToolExecutor Adapter", zap.Error(err))
+		}
+	}
+
+	if ua.providerRegistry != nil {
+		providerAdapter := wiring.NewProviderRegistryAdapter(ua.providerRegistry, ua.logger)
+		if err := ua.wiringLayer.RegisterAdapter(providerAdapter); err != nil {
+			ua.logger.Warn("فشل تسجيل ProviderRegistry Adapter", zap.Error(err))
+		}
+	}
+
+	if ua.router != nil {
+		routerAdapter := wiring.NewRouterAdapter(ua.router, ua.logger)
+		if err := ua.wiringLayer.RegisterAdapter(routerAdapter); err != nil {
+			ua.logger.Warn("فشل تسجيل Router Adapter", zap.Error(err))
+		}
+	}
+
+	if ua.sessionEventBus != nil {
+		eventBusAdapter := wiring.NewEventBusAdapter(ua.sessionEventBus, ua.logger)
+		if err := ua.wiringLayer.RegisterAdapter(eventBusAdapter); err != nil {
+			ua.logger.Warn("فشل تسجيل EventBus Adapter", zap.Error(err))
+		}
+	}
+
+	// تسجيل WorkflowEngine إذا كان موجوداً في ThinkingEngine
+	if ua.thinkingEngine != nil {
+		workflowEngine := ua.thinkingEngine.GetWorkflowEngine()
+		if workflowEngine != nil {
+			workflowAdapter := wiring.NewWorkflowEngineAdapter(workflowEngine, ua.logger)
+			if err := ua.wiringLayer.RegisterAdapter(workflowAdapter); err != nil {
+				ua.logger.Warn("فشل تسجيل WorkflowEngine Adapter", zap.Error(err))
+			}
+		}
+	}
+
+	ua.logger.Info("تم تسجيل جميع Adapters في WiringLayer")
+
+	// استدعاء AutoWire للربط التلقائي
+	if err := ua.wiringLayer.AutoWire(ctx); err != nil {
+		ua.logger.Warn("فشل AutoWire للربط التلقائي", zap.Error(err))
+		// لا نرجع خطأ لأن الربط اليدوي موجود بالفعل
+	} else {
+		ua.logger.Info("تم ربط جميع Adapters تلقائياً بنجاح")
+	}
+
+	// التحقق من حالة الاتصالات
+	status := ua.wiringLayer.GetConnectionStatus()
+	ua.logger.Info("حالة اتصالات WiringLayer",
+		zap.Bool("connected", status["connected"].(bool)),
+		zap.Int("adapters_count", status["adapters_count"].(int)),
+		zap.Int("connections_count", status["connections_count"].(int)),
+	)
+
 	return nil
 }
 

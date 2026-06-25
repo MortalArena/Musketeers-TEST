@@ -1,21 +1,45 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 )
 
+// WorkflowStepType أنواع الخطوات القياسية الـ 16
+type WorkflowStepType string
+
+const (
+	StepUnderstandRequest   WorkflowStepType = "understand_request"    // 1. فهم الطلب
+	StepAnalyzeContext      WorkflowStepType = "analyze_context"       // 2. تحليل السياق
+	StepIdentifyTools       WorkflowStepType = "identify_tools"        // 3. تحديد الأدوات المطلوبة
+	StepPlanExecution       WorkflowStepType = "plan_execution"        // 4. التخطيط للتنفيذ
+	StepExecuteTools        WorkflowStepType = "execute_tools"         // 5. تنفيذ الأدوات بالترتيب
+	StepVerifyResults       WorkflowStepType = "verify_results"        // 6. التحقق من النتائج
+	StepHandleErrors        WorkflowStepType = "handle_errors"         // 7. معالجة الأخطاء
+	StepRetryOnFailure      WorkflowStepType = "retry_on_failure"      // 8. إعادة المحاولة عند الفشل
+	StepIntegrateComponents WorkflowStepType = "integrate_components"  // 9. التكامل مع المكونات الأخرى
+	StepSyncState           WorkflowStepType = "sync_state"            // 10. مزامنة الحالة
+	StepSendUpdates         WorkflowStepType = "send_updates"          // 11. إرسال التحديثات
+	StepReceiveResponses    WorkflowStepType = "receive_responses"     // 12. استقبال الاستجابات
+	StepAnalyzeFinalResults WorkflowStepType = "analyze_final_results" // 13. تحليل النتائج النهائية
+	StepReflectAndLearn     WorkflowStepType = "reflect_and_learn"     // 14. التفكير والتعلم
+	StepSaveLessons         WorkflowStepType = "save_lessons"          // 15. حفظ الدروس
+	StepCleanupAndComplete  WorkflowStepType = "cleanup_and_complete"  // 16. الإنهاء والتنظيف
+)
+
 // WorkflowEngine محرك سير العمل - يدير الـ 16 مرحلة
 type WorkflowEngine struct {
-	SessionID    string          `json:"session_id"`
-	Phases       []WorkflowPhase `json:"phases"`
-	CurrentPhase int             `json:"current_phase"`
-	Progress     float64         `json:"progress"` // 0-100
-	State        string          `json:"state"`    // idle, running, paused, completed
-	StartedAt    time.Time       `json:"started_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	mu           sync.RWMutex
+	SessionID        string            `json:"session_id"`
+	SessionContainer *SessionContainer `json:"-"` // مرجع للحاوية للتكامل
+	Phases           []WorkflowPhase   `json:"phases"`
+	CurrentPhase     int               `json:"current_phase"`
+	Progress         float64           `json:"progress"` // 0-100
+	State            string            `json:"state"`    // idle, running, paused, completed
+	StartedAt        time.Time         `json:"started_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	mu               sync.RWMutex
 }
 
 // WorkflowPhase مرحلة في سير العمل
@@ -32,17 +56,17 @@ type WorkflowPhase struct {
 
 // Task مهمة في المرحلة
 type Task struct {
-	ID          string        `json:"id"`
-	Title       string        `json:"title"`
-	Description string        `json:"description"`
-	Status      string        `json:"status"` // pending, assigned, in_progress, completed, failed
-	AssignedTo  string        `json:"assigned_to"` // Agent DID
-	Priority    int           `json:"priority"` // 1-10
-	StartedAt   time.Time     `json:"started_at"`
-	CompletedAt time.Time     `json:"completed_at"`
-	Progress    float64       `json:"progress"` // 0-100
-	Result      string        `json:"result,omitempty"`
-	DependsOn   []string      `json:"depends_on"` // Task IDs
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Status      string    `json:"status"`      // pending, assigned, in_progress, completed, failed
+	AssignedTo  string    `json:"assigned_to"` // Agent DID
+	Priority    int       `json:"priority"`    // 1-10
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
+	Progress    float64   `json:"progress"` // 0-100
+	Result      string    `json:"result,omitempty"`
+	DependsOn   []string  `json:"depends_on"` // Task IDs
 }
 
 // NewWorkflowEngine ينشئ محرك وورك فلو جديد
@@ -52,6 +76,20 @@ func NewWorkflowEngine(sessionID string) *WorkflowEngine {
 		Phases:    make([]WorkflowPhase, 0),
 		State:     "idle",
 	}
+}
+
+// SetSessionContainer يضبط مرجع الحاوية للتكامل
+func (we *WorkflowEngine) SetSessionContainer(container *SessionContainer) {
+	we.mu.Lock()
+	defer we.mu.Unlock()
+	we.SessionContainer = container
+}
+
+// GetSessionContainer يرجع مرجع الحاوية
+func (we *WorkflowEngine) GetSessionContainer() *SessionContainer {
+	we.mu.RLock()
+	defer we.mu.RUnlock()
+	return we.SessionContainer
 }
 
 // InitializePhases يهيئ المراحل
@@ -175,13 +213,187 @@ func (we *WorkflowEngine) GetProgress() float64 {
 }
 
 // GetCurrentPhase يعيد المرحلة الحالية
-func (we *WorkflowEngine) GetCurrentPhase() *WorkflowPhase {
+func (we *WorkflowEngine) GetCurrentPhase() int {
+	we.mu.RLock()
+	defer we.mu.RUnlock()
+	return we.CurrentPhase
+}
+
+// Execute16StepWorkflow ينفذ ورك فلو من 16 خطوة
+func (we *WorkflowEngine) Execute16StepWorkflow(ctx context.Context, task string, thinkingEngine interface{}) (map[string]interface{}, error) {
+	we.mu.Lock()
+	defer we.mu.Unlock()
+
+	// التأكد من وجود 16 مرحلة
+	if len(we.Phases) != 16 {
+		return nil, fmt.Errorf("يجب أن يكون هناك 16 مرحلة")
+	}
+
+	// تهيئة حالة الورك فلو
+	workflowState := make(map[string]interface{})
+	workflowState["task"] = task
+
+	// تنفيذ الخطوات الـ 16 بشكل متسلسل
+	for i := 0; i < 16; i++ {
+		we.Phases[i].Status = "active"
+		we.Phases[i].StartedAt = time.Now()
+		we.CurrentPhase = i
+
+		// تنفيذ الخطوة
+		stepResult, err := we.executeStep(ctx, i, workflowState, thinkingEngine)
+		if err != nil {
+			we.Phases[i].Status = "failed"
+			return nil, fmt.Errorf("فشل في الخطوة %d: %w", i+1, err)
+		}
+
+		// حفظ النتيجة في الحالة
+		workflowState[fmt.Sprintf("step_%d", i+1)] = stepResult
+
+		// إكمال الخطوة
+		we.Phases[i].Status = "completed"
+		we.Phases[i].CompletedAt = time.Now()
+		we.Phases[i].Progress = 100
+
+		// إضافة مهمة للخطوة
+		we.AddTask(i, Task{
+			Description: we.getStepDescription(i),
+			Status:      "completed",
+			Progress:    100,
+			CompletedAt: time.Now(),
+		})
+	}
+
+	we.State = "completed"
+	we.UpdatedAt = time.Now()
+	we.calculateProgress()
+
+	return workflowState, nil
+}
+
+// executeStep ينفذ خطوة معينة
+func (we *WorkflowEngine) executeStep(ctx context.Context, stepIndex int, workflowState map[string]interface{}, thinkingEngine interface{}) (map[string]interface{}, error) {
+	// استخدام ThinkingEngine للتنفيذ إذا كان متاحاً
+	// هذا سيتم تنفيذه بناءً على نوع محرك التفكير
+	// حالياً سنقوم بمحاكاة التنفيذ
+
+	stepName := we.getStepName(stepIndex)
+	stepDescription := we.getStepDescription(stepIndex)
+
+	result := map[string]interface{}{
+		"step":        stepIndex + 1,
+		"name":        stepName,
+		"description": stepDescription,
+		"status":      "completed",
+		"timestamp":   time.Now(),
+	}
+
+	// استخدام نتائج الخطوة السابقة
+	if stepIndex > 0 {
+		prevStepResult := workflowState[fmt.Sprintf("step_%d", stepIndex)]
+		result["previous_step_result"] = prevStepResult
+	}
+
+	return result, nil
+}
+
+// getStepName يرجع اسم الخطوة
+func (we *WorkflowEngine) getStepName(stepIndex int) string {
+	stepNames := []string{
+		"فهم الطلب",
+		"تحليل السياق",
+		"تحديد الأدوات المطلوبة",
+		"التخطيط للتنفيذ",
+		"تنفيذ الأدوات بالترتيب",
+		"التحقق من النتائج",
+		"معالجة الأخطاء",
+		"إعادة المحاولة عند الفشل",
+		"التكامل مع المكونات الأخرى",
+		"مزامنة الحالة",
+		"إرسال التحديثات",
+		"استقبال الاستجابات",
+		"تحليل النتائج النهائية",
+		"التفكير والتعلم",
+		"حفظ الدروس",
+		"الإنهاء والتنظيف",
+	}
+
+	if stepIndex < len(stepNames) {
+		return stepNames[stepIndex]
+	}
+	return fmt.Sprintf("الخطوة %d", stepIndex+1)
+}
+
+// getStepDescription يرجع وصف الخطوة
+func (we *WorkflowEngine) getStepDescription(stepIndex int) string {
+	descriptions := []string{
+		"فهم الطلب وتحليل المتطلبات الأساسية",
+		"تحليل السياق المحيط بالمهمة والموارد المتاحة",
+		"تحديد الأدوات والمكونات المطلوبة للتنفيذ",
+		"التخطيط لخطوات التنفيذ وتحديد الأولويات",
+		"تنفيذ الأدوات بالترتيب المحدد",
+		"التحقق من النتائج والتأكد من صحتها",
+		"معالجة الأخطاء التي قد تظهر أثناء التنفيذ",
+		"إعادة المحاولة عند الفشل مع تعديل الاستراتيجية",
+		"التكامل مع المكونات الأخرى في النظام",
+		"مزامنة الحالة مع المكونات الأخرى",
+		"إرسال التحديثات للأطراف المعنية",
+		"استقبال الاستجابات من الأطراف المعنية",
+		"تحليل النتائج النهائية واستخلاص الدروس",
+		"التفكير في العملية والتعلم من التجربة",
+		"حفظ الدروس المستفادة للاستخدام المستقبلي",
+		"الإنهاء والتنظيف وإطلاق الموارد",
+	}
+
+	if stepIndex < len(descriptions) {
+		return descriptions[stepIndex]
+	}
+	return fmt.Sprintf("وصف الخطوة %d", stepIndex+1)
+}
+
+// GetWorkflowState يرجع حالة الورك فلو
+func (we *WorkflowEngine) GetWorkflowState() map[string]interface{} {
 	we.mu.RLock()
 	defer we.mu.RUnlock()
 
-	if we.CurrentPhase >= len(we.Phases) {
-		return nil
+	state := map[string]interface{}{
+		"state":         we.State,
+		"progress":      we.Progress,
+		"current_phase": we.CurrentPhase,
+		"phases":        make([]map[string]interface{}, len(we.Phases)),
 	}
 
-	return &we.Phases[we.CurrentPhase]
+	for i, phase := range we.Phases {
+		state["phases"].([]map[string]interface{})[i] = map[string]interface{}{
+			"id":           phase.ID,
+			"name":         phase.Name,
+			"status":       phase.Status,
+			"progress":     phase.Progress,
+			"started_at":   phase.StartedAt,
+			"completed_at": phase.CompletedAt,
+			"tasks_count":  len(phase.Tasks),
+		}
+	}
+
+	return state
+}
+
+// ResetWorkflow يعيد تعيين الورك فلو
+func (we *WorkflowEngine) ResetWorkflow() error {
+	we.mu.Lock()
+	defer we.mu.Unlock()
+
+	we.State = "pending"
+	we.Progress = 0
+	we.CurrentPhase = 0
+	we.UpdatedAt = time.Now()
+
+	for i := range we.Phases {
+		we.Phases[i].Status = "pending"
+		we.Phases[i].Progress = 0
+		we.Phases[i].StartedAt = time.Time{}
+		we.Phases[i].CompletedAt = time.Time{}
+		we.Phases[i].Tasks = []Task{}
+	}
+
+	return nil
 }

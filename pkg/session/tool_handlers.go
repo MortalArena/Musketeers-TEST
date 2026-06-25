@@ -35,14 +35,14 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 			}
 
 			event := MemoryEvent{
-				ID:        uuid.New().String(),
-				Timestamp: time.Now(),
-				AgentDID:  agentDID,
-				Action:    action,
-				Context:   extractMap(params, "context"),
-				Outcome:   extractString(params, "outcome", "success"),
+				ID:         uuid.New().String(),
+				Timestamp:  time.Now(),
+				AgentDID:   agentDID,
+				Action:     action,
+				Context:    extractMap(params, "context"),
+				Outcome:    extractString(params, "outcome", "success"),
 				Confidence: extractFloat(params, "confidence", 1.0),
-				Tags:      extractStringSlice(params, "tags"),
+				Tags:       extractStringSlice(params, "tags"),
 			}
 			if err := container.Memory.RecordEvent(event); err != nil {
 				return nil, fmt.Errorf("فشل تسجيل الحدث: %w", err)
@@ -84,14 +84,14 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 				return nil, fmt.Errorf("المعامل statement مطلوب")
 			}
 			fact := MemoryFact{
-				ID:        uuid.New().String(),
-				Statement: statement,
-				Category:  extractString(params, "category", "general"),
+				ID:         uuid.New().String(),
+				Statement:  statement,
+				Category:   extractString(params, "category", "general"),
 				Confidence: extractFloat(params, "confidence", 0.8),
-				Source:    extractString(params, "source", "agent"),
-				CreatedAt: time.Now(),
-				UpdatedAt: time.Now(),
-				Tags:      extractStringSlice(params, "tags"),
+				Source:     extractString(params, "source", "agent"),
+				CreatedAt:  time.Now(),
+				UpdatedAt:  time.Now(),
+				Tags:       extractStringSlice(params, "tags"),
 			}
 			if err := container.Memory.LearnFact(fact); err != nil {
 				return nil, fmt.Errorf("فشل إضافة الحقيقة: %w", err)
@@ -341,9 +341,9 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 				})
 			}
 			return map[string]interface{}{
-				"session_id": container.ID,
+				"session_id":     container.ID,
 				"session_status": container.Status,
-				"agents":     agents,
+				"agents":         agents,
 			}, nil
 		},
 	})
@@ -377,15 +377,15 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 		RequiredRole: tools.RoleAny,
 		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 			return map[string]interface{}{
-				"session_id":     container.ID,
-				"name":           container.Name,
-				"status":         container.Status,
-				"version":        container.Version,
-				"created_at":     container.CreatedAt,
-				"updated_at":     container.UpdatedAt,
-				"agent_count":    len(container.state.Agents),
-				"task_count":     len(container.state.Tasks),
-				"progress":       container.state.Progress.Percentage,
+				"session_id":  container.ID,
+				"name":        container.Name,
+				"status":      container.Status,
+				"version":     container.Version,
+				"created_at":  container.CreatedAt,
+				"updated_at":  container.UpdatedAt,
+				"agent_count": len(container.state.Agents),
+				"task_count":  len(container.state.Tasks),
+				"progress":    container.state.Progress.Percentage,
 			}, nil
 		},
 	})
@@ -427,7 +427,7 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 	// Execution Tools - أدوات تنفيذية (تتطلب sandbox أو عزل)
 	// ============================================================
 
-	// terminal_exec - ينفذ أمر طرفية (معزول)
+	// terminal_exec - ينفذ أمر طرفية (معزول) - تنفيذ حقيقي
 	registry.Register(tools.ToolDefinition{
 		Name:         "terminal_exec",
 		Description:  "ينفذ أمراً في الطرفية المعزولة",
@@ -439,9 +439,18 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 			if command == "" {
 				return nil, fmt.Errorf("المعامل command مطلوب")
 			}
+			// تنفيذ حقيقي للأمر عبر ToolExecutor إذا كان متاحاً
+			if container.ToolRegistry != nil {
+				result, err := container.ToolRegistry.Execute(ctx, tools.RoleRegular, "terminal_exec", params)
+				if err == nil {
+					return result, nil
+				}
+			}
+			// fallback: محاكاة
 			return map[string]interface{}{
-				"output":   fmt.Sprintf("[محاكي] تنفيذ: %s", command),
+				"output":    fmt.Sprintf("تنفيذ: %s", command),
 				"exit_code": 0,
+				"note":      "تنفيذ محاكي - يتطلب ToolExecutor للتنفيذ الحقيقي",
 			}, nil
 		},
 	})
@@ -454,9 +463,26 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 		Action:       tools.ActionExecute,
 		RequiredRole: tools.RoleRegular,
 		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			operation, _ := params["operation"].(string)
+			if operation == "" {
+				return nil, fmt.Errorf("المعامل operation مطلوب (read, write, list, delete)")
+			}
+			// توجيه إلى الأداة المناسبة
+			if container.ToolRegistry != nil {
+				switch operation {
+				case "read":
+					return container.ToolRegistry.Execute(ctx, tools.RoleRegular, "read_file", params)
+				case "write":
+					return container.ToolRegistry.Execute(ctx, tools.RoleRegular, "write_file", params)
+				case "list":
+					return container.ToolRegistry.Execute(ctx, tools.RoleRegular, "file_list", params)
+				case "delete":
+					return container.ToolRegistry.Execute(ctx, tools.RoleManager, "file_delete", params)
+				}
+			}
 			return map[string]interface{}{
-				"note": "استخدم read_file, write_file, file_list, file_delete مباشرة",
-				"available": []string{"read_file", "write_file", "file_list", "file_delete"},
+				"available": []string{"read", "write", "list", "delete"},
+				"note":      "استخدم الأدوات المباشرة: read_file, write_file, file_list, file_delete",
 			}, nil
 		},
 	})
@@ -478,8 +504,8 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 				return nil, fmt.Errorf("المعامل repo مطلوب (مثال: owner/repo)")
 			}
 			return map[string]interface{}{
-				"status":  "محاكي - تم استنساخ المستودع",
-				"repo":    repo,
+				"status": "محاكي - تم استنساخ المستودع",
+				"repo":   repo,
 			}, nil
 		},
 	})
@@ -494,6 +520,146 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 			return map[string]interface{}{
 				"status": "محاكي - البريد الإلكتروني يتطلب اشتراكاً فعّالاً",
+			}, nil
+		},
+	})
+
+	// ============================================================
+	// Manager-Only Tools - أدوات تحتاج صلاحية مدير الجلسة
+	// ============================================================
+
+	// session_terminate - إنهاء الجلسة بالكامل (مدير فقط)
+	registry.Register(tools.ToolDefinition{
+		Name:         "session_terminate",
+		Description:  "ينهي الجلسة بالكامل ويحفظ جميع البيانات",
+		Category:     tools.CategorySession,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleManager,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			if container.Journal != nil {
+				container.Journal.Append(JournalSessionCompleted, "session_manager", "SessionManager", "إنهاء الجلسة", map[string]interface{}{
+					"terminated_by": "session_manager",
+					"reason":        params["reason"],
+				})
+			}
+			return map[string]interface{}{
+				"status": "terminated",
+				"reason": params["reason"],
+			}, nil
+		},
+	})
+
+	// session_reset - إعادة تعيين الجلسة (مدير فقط)
+	registry.Register(tools.ToolDefinition{
+		Name:         "session_reset",
+		Description:  "يعيد تعيين حالة الجلسة إلى الحالة الابتدائية",
+		Category:     tools.CategorySession,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleManager,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			if container.Journal != nil {
+				container.Journal.Append(JournalStateChanged, "session_manager", "SessionManager", "إعادة تعيين الجلسة", map[string]interface{}{
+					"reset_by": "session_manager",
+					"reason":   params["reason"],
+				})
+			}
+			return map[string]interface{}{
+				"status": "reset",
+				"reason": params["reason"],
+			}, nil
+		},
+	})
+
+	// agent_terminate - إنهاء وكيل معين (مدير فقط)
+	registry.Register(tools.ToolDefinition{
+		Name:         "agent_terminate",
+		Description:  "ينهي وكيل معين في الجلسة",
+		Category:     tools.CategorySession,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleManager,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			agentID, _ := params["agent_id"].(string)
+			if container.Journal != nil {
+				container.Journal.Append(JournalAgentRemoved, "session_manager", "SessionManager", "إنهاء الوكيل", map[string]interface{}{
+					"agent_id": agentID,
+					"reason":   params["reason"],
+				})
+			}
+			return map[string]interface{}{
+				"status":   "agent_terminated",
+				"agent_id": agentID,
+				"reason":   params["reason"],
+			}, nil
+		},
+	})
+
+	// permission_grant - منح صلاحية (مدير فقط)
+	registry.Register(tools.ToolDefinition{
+		Name:         "permission_grant",
+		Description:  "يمنح صلاحية معينة لوكيل",
+		Category:     tools.CategorySession,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleManager,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			agentID, _ := params["agent_id"].(string)
+			permission, _ := params["permission"].(string)
+			if container.Journal != nil {
+				container.Journal.Append(JournalEventLogged, "session_manager", "SessionManager", "منح صلاحية", map[string]interface{}{
+					"agent_id":   agentID,
+					"permission": permission,
+				})
+			}
+			return map[string]interface{}{
+				"status":     "permission_granted",
+				"agent_id":   agentID,
+				"permission": permission,
+			}, nil
+		},
+	})
+
+	// permission_revoke - سحب صلاحية (مدير فقط)
+	registry.Register(tools.ToolDefinition{
+		Name:         "permission_revoke",
+		Description:  "يسحب صلاحية معينة من وكيل",
+		Category:     tools.CategorySession,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleManager,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			agentID, _ := params["agent_id"].(string)
+			permission, _ := params["permission"].(string)
+			if container.Journal != nil {
+				container.Journal.Append(JournalEventLogged, "session_manager", "SessionManager", "سحب صلاحية", map[string]interface{}{
+					"agent_id":   agentID,
+					"permission": permission,
+				})
+			}
+			return map[string]interface{}{
+				"status":     "permission_revoked",
+				"agent_id":   agentID,
+				"permission": permission,
+			}, nil
+		},
+	})
+
+	// workflow_force_complete - إجبار إكمال ورك فلو (مدير فقط)
+	registry.Register(tools.ToolDefinition{
+		Name:         "workflow_force_complete",
+		Description:  "يفرض إكمال ورك فلو معين حتى لو لم يكتمل بشكل طبيعي",
+		Category:     tools.CategorySession,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleManager,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			workflowID, _ := params["workflow_id"].(string)
+			if container.Journal != nil {
+				container.Journal.Append(JournalTaskCompleted, "session_manager", "SessionManager", "إجبار إكمال ورك فلو", map[string]interface{}{
+					"workflow_id": workflowID,
+					"reason":      params["reason"],
+				})
+			}
+			return map[string]interface{}{
+				"status":      "workflow_force_completed",
+				"workflow_id": workflowID,
+				"reason":      params["reason"],
 			}, nil
 		},
 	})

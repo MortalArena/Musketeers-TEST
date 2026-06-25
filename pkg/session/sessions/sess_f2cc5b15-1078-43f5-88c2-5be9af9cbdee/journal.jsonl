@@ -1,0 +1,1 @@
+{"id":"f1bd360c-584c-40ec-ba4b-e1bf956cffb3","timestamp":"2026-06-24T17:18:21.4284598+03:00","type":"session.created","source_id":"did:test:123","source_type":"human","summary":"تم إنشاء الجلسة","details":{"description":"Test","max_agents":5,"name":"Test","owner":"did:test:123"},"session_id":"sess_f2cc5b15-1078-43f5-88c2-5be9af9cbdee"}

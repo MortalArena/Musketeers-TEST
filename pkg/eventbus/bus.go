@@ -11,10 +11,12 @@ import (
 type EventBus struct {
 	handlers   map[string][]Handler
 	mu         sync.RWMutex
-	eventQueue chan Event     // [WHY] قائمة انتظار للأحداث لمنع Goroutine Leak
-	running    bool           // [WHY] لمعرفة ما إذا كانت عملية المعالجة تعمل
-	queueMu    sync.RWMutex   // [SAFETY] لحماية حالة running
-	wg         sync.WaitGroup // [FIX] لانتظار إغلاق goroutine بشكل صحيح
+	eventQueue chan Event       // [WHY] قائمة انتظار للأحداث لمنع Goroutine Leak
+	running    bool             // [WHY] لمعرفة ما إذا كانت عملية المعالجة تعمل
+	queueMu    sync.RWMutex     // [SAFETY] لحماية حالة running
+	wg         sync.WaitGroup   // [FIX] لانتظار إغلاق goroutine بشكل صحيح
+	dlq        *DeadLetterQueue // [FIX] Dead Letter Queue للأحداث المرفوضة
+	logger     interface{}      // [FIX] Logger لتسجيل الأحداث المرفوضة
 }
 
 // Handler دالة معالجة الحدث
@@ -38,7 +40,11 @@ func NewEventBus() *EventBus {
 		handlers:   make(map[string][]Handler),
 		eventQueue: make(chan Event, 10000), // [WHY] سعة 10000 لمنع الحظر تحت الحمل
 		running:    true,
+		logger:     nil, // سيتم تعيينه لاحقاً
 	}
+
+	// [FIX] إنشاء DLQ
+	eb.dlq = NewDeadLetterQueue(eb, 1000) // Max 1000 entries in DLQ
 
 	// [FIX] إضافة goroutine إلى WaitGroup
 	eb.wg.Add(1)
@@ -129,6 +135,7 @@ func (eb *EventBus) Subscribe(eventType string, handler Handler) {
 // [WHY] يستخدم قائمة انتظار لمنع Goroutine Leak تحت الحمل
 // [HOW] يضع الحدث في eventQueue باستخدام select مع default لمنع الحظر
 // [SAFETY] يبقي القفل (RLock) خلال التحقق من running والإرسال معاً لمنع TOCTOU
+// [FIX] إذا امتلأت القائمة، يضيف الحدث إلى DLQ بدلاً من Silent Drop
 func (eb *EventBus) Publish(event Event) {
 	eb.queueMu.RLock()
 	defer eb.queueMu.RUnlock()
@@ -144,8 +151,10 @@ func (eb *EventBus) Publish(event Event) {
 	case eb.eventQueue <- event:
 		// [OK] الحدث تم وضعه في القائمة
 	default:
-		// [SAFETY] القائمة ممتلئة، تجاهل الحدث لمنع الحظر
-		// [TODO] تسجيل تحذير في logger
+		// [FIX] القائمة ممتلئة، أضف الحدث إلى DLQ
+		if eb.dlq != nil {
+			eb.dlq.Add(event)
+		}
 	}
 }
 

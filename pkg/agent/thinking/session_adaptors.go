@@ -2,10 +2,130 @@ package thinking
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/session"
 )
+
+// SessionJournalAdaptor يربط واجهة ISessionJournal مع session.SessionJournal
+type SessionJournalAdaptor struct {
+	sessionJournal *session.SessionJournal
+}
+
+func NewSessionJournalAdaptor(sj *session.SessionJournal) *SessionJournalAdaptor {
+	return &SessionJournalAdaptor{sessionJournal: sj}
+}
+
+func (a *SessionJournalAdaptor) GetRecentEvents(limit int) []JournalEntry {
+	if a.sessionJournal == nil {
+		return []JournalEntry{}
+	}
+
+	sessionEntries := a.sessionJournal.All()
+	if limit > 0 && len(sessionEntries) > limit {
+		sessionEntries = sessionEntries[len(sessionEntries)-limit:]
+	}
+
+	entries := make([]JournalEntry, len(sessionEntries))
+	for i, se := range sessionEntries {
+		var details map[string]interface{}
+		if se.Details != nil {
+			json.Unmarshal(se.Details, &details)
+		}
+		entries[i] = JournalEntry{
+			ID:         se.ID,
+			Timestamp:  se.Timestamp,
+			Type:       string(se.Type),
+			SourceID:   se.SourceID,
+			SourceType: se.SourceType,
+			Summary:    se.Summary,
+			Details:    details,
+			SessionID:  se.SessionID,
+		}
+	}
+	return entries
+}
+
+func (a *SessionJournalAdaptor) GetEventsByType(eventType string) []JournalEntry {
+	if a.sessionJournal == nil {
+		return []JournalEntry{}
+	}
+
+	sessionEntries := a.sessionJournal.Query(session.JournalEntryType(eventType), 0)
+	entries := make([]JournalEntry, len(sessionEntries))
+	for i, se := range sessionEntries {
+		var details map[string]interface{}
+		if se.Details != nil {
+			json.Unmarshal(se.Details, &details)
+		}
+		entries[i] = JournalEntry{
+			ID:         se.ID,
+			Timestamp:  se.Timestamp,
+			Type:       string(se.Type),
+			SourceID:   se.SourceID,
+			SourceType: se.SourceType,
+			Summary:    se.Summary,
+			Details:    details,
+			SessionID:  se.SessionID,
+		}
+	}
+	return entries
+}
+
+func (a *SessionJournalAdaptor) GetEventsByAgent(agentID string) []JournalEntry {
+	if a.sessionJournal == nil {
+		return []JournalEntry{}
+	}
+
+	sessionEntries := a.sessionJournal.QueryBySource(agentID, 0)
+	entries := make([]JournalEntry, len(sessionEntries))
+	for i, se := range sessionEntries {
+		var details map[string]interface{}
+		if se.Details != nil {
+			json.Unmarshal(se.Details, &details)
+		}
+		entries[i] = JournalEntry{
+			ID:         se.ID,
+			Timestamp:  se.Timestamp,
+			Type:       string(se.Type),
+			SourceID:   se.SourceID,
+			SourceType: se.SourceType,
+			Summary:    se.Summary,
+			Details:    details,
+			SessionID:  se.SessionID,
+		}
+	}
+	return entries
+}
+
+func (a *SessionJournalAdaptor) GetAllEvents() []JournalEntry {
+	if a.sessionJournal == nil {
+		return []JournalEntry{}
+	}
+
+	sessionEntries := a.sessionJournal.All()
+	entries := make([]JournalEntry, len(sessionEntries))
+	for i, se := range sessionEntries {
+		var details map[string]interface{}
+		if se.Details != nil {
+			json.Unmarshal(se.Details, &details)
+		}
+		entries[i] = JournalEntry{
+			ID:         se.ID,
+			Timestamp:  se.Timestamp,
+			Type:       string(se.Type),
+			SourceID:   se.SourceID,
+			SourceType: se.SourceType,
+			Summary:    se.Summary,
+			Details:    details,
+			SessionID:  se.SessionID,
+		}
+	}
+	return entries
+}
+
+// CollectiveMemoryAdaptor يربط واجهة ICollectiveMemory مع session.CollectiveMemory
 
 // CollectiveMemoryAdaptor يربط واجهة ICollectiveMemory مع session.CollectiveMemory
 type CollectiveMemoryAdaptor struct {

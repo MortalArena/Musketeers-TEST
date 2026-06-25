@@ -68,6 +68,7 @@ type ManagedTask struct {
 	CompletedAt *time.Time             `json:"completed_at,omitempty"`
 	Timeout     time.Duration          `json:"timeout"`
 	Metadata    map[string]interface{} `json:"metadata"`
+	heapIndex   int                    `index في الـ Heap لإزالة فعالة`
 }
 
 // TaskHeap كومة الأولويات للمهام
@@ -75,16 +76,24 @@ type TaskHeap []*ManagedTask
 
 func (h TaskHeap) Len() int           { return len(h) }
 func (h TaskHeap) Less(i, j int) bool { return h[i].Priority > h[j].Priority }
-func (h TaskHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h TaskHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].heapIndex = i
+	h[j].heapIndex = j
+}
 
 func (h *TaskHeap) Push(x interface{}) {
-	*h = append(*h, x.(*ManagedTask))
+	n := len(*h)
+	task := x.(*ManagedTask)
+	task.heapIndex = n
+	*h = append(*h, task)
 }
 
 func (h *TaskHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
+	x.heapIndex = -1 // Mark as removed
 	*h = old[0 : n-1]
 	return x
 }
@@ -113,6 +122,7 @@ type TaskManager struct {
 	runningTasks   map[string]*ManagedTask
 	completedTasks map[string]*ManagedTask
 	failedTasks    map[string]*ManagedTask
+	cancelledTasks map[string]*ManagedTask
 
 	// حالة الوكلاء
 	agentStates map[string]*AgentState
@@ -133,6 +143,7 @@ func NewTaskManager(sessionID string) *TaskManager {
 		runningTasks:   make(map[string]*ManagedTask),
 		completedTasks: make(map[string]*ManagedTask),
 		failedTasks:    make(map[string]*ManagedTask),
+		cancelledTasks: make(map[string]*ManagedTask),
 		agentStates:    make(map[string]*AgentState),
 	}
 }
@@ -233,11 +244,13 @@ func (tm *TaskManager) AssignTask(ctx context.Context, taskID, agentID string) e
 		return fmt.Errorf("maximum running tasks limit reached (%d)", MaxRunningTasks)
 	}
 
-	// البحث عن المهمة في قائمة الانتظار
+	// البحث عن المهمة في قائمة الانتظار باستخدام heapIndex
 	var task *ManagedTask
+	var taskIndex = -1
 	for _, t := range *tm.pendingQueue {
 		if t.ID == taskID {
 			task = t
+			taskIndex = t.heapIndex
 			break
 		}
 	}
@@ -251,7 +264,15 @@ func (tm *TaskManager) AssignTask(ctx context.Context, taskID, agentID string) e
 	task.AgentID = agentID
 	task.UpdatedAt = time.Now()
 
-	// إزالة من قائمة الانتظار وإضافتها للقائمة الجارية
+	// إزالة من قائمة الانتظار بشكل صحيح باستخدام heap.Remove
+	if taskIndex >= 0 && taskIndex < tm.pendingQueue.Len() {
+		removedTask := heap.Remove(tm.pendingQueue, taskIndex).(*ManagedTask)
+		if removedTask.ID != taskID {
+			return fmt.Errorf("heap.Remove removed wrong task")
+		}
+	}
+
+	// إضافتها للقائمة الجارية
 	tm.runningTasks[taskID] = task
 
 	tm.logger.Info("Task assigned",
@@ -408,11 +429,14 @@ func (tm *TaskManager) CancelTask(ctx context.Context, taskID string) error {
 
 	// البحث في قائمة الانتظار
 	var found bool
-	for i, t := range *tm.pendingQueue {
+	for _, t := range *tm.pendingQueue {
 		if t.ID == taskID {
 			t.Status = TaskStatusCancelled
 			t.UpdatedAt = time.Now()
-			heap.Remove(tm.pendingQueue, i)
+			// إزالة بشكل صحيح باستخدام heap.Remove
+			if t.heapIndex >= 0 && t.heapIndex < tm.pendingQueue.Len() {
+				heap.Remove(tm.pendingQueue, t.heapIndex)
+			}
 			found = true
 			break
 		}
@@ -424,6 +448,7 @@ func (tm *TaskManager) CancelTask(ctx context.Context, taskID string) error {
 			task.Status = TaskStatusCancelled
 			task.UpdatedAt = time.Now()
 			delete(tm.runningTasks, taskID)
+			tm.cancelledTasks[taskID] = task
 			found = true
 
 			// تحديث حالة الوكيل
@@ -475,6 +500,10 @@ func (tm *TaskManager) GetTask(taskID string) (*ManagedTask, error) {
 	}
 
 	if task, exists := tm.failedTasks[taskID]; exists {
+		return task, nil
+	}
+
+	if task, exists := tm.cancelledTasks[taskID]; exists {
 		return task, nil
 	}
 

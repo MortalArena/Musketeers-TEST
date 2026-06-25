@@ -6,30 +6,102 @@ import (
 	"sync"
 
 	"github.com/MortalArena/Musketeers/pkg/agent"
+	"github.com/MortalArena/Musketeers/pkg/agent/unified"
 	"github.com/MortalArena/Musketeers/pkg/verification"
 	"go.uber.org/zap"
 )
 
+// CapabilityMatcher يطابق القدرات المطلوبة مع الوكلاء
+type CapabilityMatcher struct {
+	agentCapabilities map[string][]agent.AgentCapability
+	capabilityAgents  map[agent.AgentCapability][]string
+	mu                sync.RWMutex
+}
+
+// NewCapabilityMatcher ينشئ مطابق قدرات جديد
+func NewCapabilityMatcher() *CapabilityMatcher {
+	return &CapabilityMatcher{
+		agentCapabilities: make(map[string][]agent.AgentCapability),
+		capabilityAgents:  make(map[agent.AgentCapability][]string),
+	}
+}
+
+// RegisterCapabilities يسجل قدرات وكيل
+func (cm *CapabilityMatcher) RegisterCapabilities(agentID string, capabilities []agent.AgentCapability) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cm.agentCapabilities[agentID] = capabilities
+	for _, cap := range capabilities {
+		cm.capabilityAgents[cap] = append(cm.capabilityAgents[cap], agentID)
+	}
+}
+
+// FindBestAgent يجد أفضل وكيل للقدرات المطلوبة
+func (cm *CapabilityMatcher) FindBestAgent(requiredCapabilities []agent.AgentCapability) (string, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// البحث عن وكلاء لديهم جميع القدرات المطلوبة
+	candidates := make(map[string]int)
+	for _, reqCap := range requiredCapabilities {
+		agents, exists := cm.capabilityAgents[reqCap]
+		if !exists {
+			continue
+		}
+		for _, agentID := range agents {
+			candidates[agentID]++
+		}
+	}
+
+	// اختيار الوكلاء الذين لديهم جميع القدرات
+	var bestAgent string
+	maxMatches := 0
+	for agentID, matches := range candidates {
+		if matches == len(requiredCapabilities) && matches > maxMatches {
+			bestAgent = agentID
+			maxMatches = matches
+		}
+	}
+
+	if bestAgent == "" {
+		return "", fmt.Errorf("no agent found with required capabilities")
+	}
+
+	return bestAgent, nil
+}
+
+// GetAgentsByCapability يحصل على وكلاء حسب قدرة
+func (cm *CapabilityMatcher) GetAgentsByCapability(capability agent.AgentCapability) []string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	return cm.capabilityAgents[capability]
+}
+
 // OrchestratorEngine محرك التنسيق - ينسق جميع مكونات النظام
 type OrchestratorEngine struct {
-	registry         *agent.AgentRegistry
-	lifecycleManager *AgentLifecycleManager
-	roleAssigner     *RoleAssigner
-	verifier         *verification.MultiStageVerifier
-	logger           *zap.Logger
-	mu               sync.RWMutex
-	running          bool
+	registry          *agent.AgentRegistry
+	lifecycleManager  *AgentLifecycleManager
+	roleAssigner      *RoleAssigner
+	verifier          *verification.MultiStageVerifier
+	capabilityMatcher *CapabilityMatcher
+	unifiedAgent      *unified.UnifiedAgent // مرجع للتكامل مع UnifiedAgent
+	logger            *zap.Logger
+	mu                sync.RWMutex
+	running           bool
 }
 
 // NewOrchestratorEngine ينشئ محرك تنسيق جديد
 func NewOrchestratorEngine(registry *agent.AgentRegistry) *OrchestratorEngine {
 	return &OrchestratorEngine{
-		registry:         registry,
-		lifecycleManager: NewAgentLifecycleManager(registry),
-		roleAssigner:     NewRoleAssigner(registry),
-		verifier:         verification.NewMultiStageVerifier(),
-		logger:           zap.NewNop(),
-		running:          false,
+		registry:          registry,
+		lifecycleManager:  NewAgentLifecycleManager(registry),
+		roleAssigner:      NewRoleAssigner(registry),
+		verifier:          verification.NewMultiStageVerifier(),
+		capabilityMatcher: NewCapabilityMatcher(),
+		logger:            zap.NewNop(),
+		running:           false,
 	}
 }
 
@@ -41,6 +113,21 @@ func (oe *OrchestratorEngine) SetLogger(logger *zap.Logger) {
 	oe.lifecycleManager.SetLogger(logger)
 	oe.roleAssigner.SetLogger(logger)
 	oe.verifier.SetLogger(logger)
+}
+
+// SetUnifiedAgent يضبط مرجع UnifiedAgent للتكامل
+func (oe *OrchestratorEngine) SetUnifiedAgent(ua *unified.UnifiedAgent) {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+	oe.unifiedAgent = ua
+	oe.logger.Info("تم ضبط UnifiedAgent في OrchestratorEngine")
+}
+
+// GetUnifiedAgent يرجع مرجع UnifiedAgent
+func (oe *OrchestratorEngine) GetUnifiedAgent() *unified.UnifiedAgent {
+	oe.mu.RLock()
+	defer oe.mu.RUnlock()
+	return oe.unifiedAgent
 }
 
 // Start يبدأ المحرك
