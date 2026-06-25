@@ -25,7 +25,7 @@ func DefaultConfig() *Config {
 		ListenPort:      4001,
 		EnableMDNS:      true,
 		DataDir:         "./data",
-		MaxPutPerMinute: 60,
+		MaxPutPerMinute: 300, // 5/sec — كافي لبدء التشغيل دون أخطاء معدل
 		StorageQuotaMB:  1024,
 		RESTPort:        8080,
 	}

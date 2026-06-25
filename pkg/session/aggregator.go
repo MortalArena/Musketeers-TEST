@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -120,8 +121,49 @@ func (a *Aggregator) Save(final *FinalArtifact, basePath string) error {
 	return nil
 }
 
-// buildFileTree يبني شجرة الملفات
+// buildFileTree يبني شجرة الملفات من المسارات
 func (a *Aggregator) buildFileTree(artifacts []Artifact) []FileNode {
-	// بناء شجرة من المسارات
-	return []FileNode{}
+	root := make(map[string]*FileNode)
+	var result []FileNode
+
+	for _, art := range artifacts {
+		path := art.Path
+		if path == "" {
+			path = art.Name
+		}
+		parts := strings.Split(path, "/")
+		current := &result
+		for _, part := range parts {
+			if part == "" {
+				continue
+			}
+			found := false
+			for i := range *current {
+				if (*current)[i].Name == part {
+					if (*current)[i].Children == nil {
+						(*current)[i].Children = []FileNode{}
+					}
+					cp := &(*current)[i]
+					if i < len(parts)-1 {
+						current = &cp.Children
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				node := FileNode{Name: part, Children: []FileNode{}}
+				*current = append(*current, node)
+				cp := &(*current)[len(*current)-1]
+				current = &cp.Children
+			}
+		}
+	}
+	if len(result) == 0 {
+		for _, art := range artifacts {
+			result = append(result, FileNode{Name: art.Name, Children: []FileNode{}})
+		}
+	}
+	_ = root // used for potential future dedup
+	return result
 }

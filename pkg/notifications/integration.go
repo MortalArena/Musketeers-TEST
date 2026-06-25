@@ -34,40 +34,13 @@ func (a *EventBusAdapter) Subscribe(event string, handler func(data interface{})
 	return nil
 }
 
-// MockNotificationSender محاكي بسيط لـ NotificationSender
-type MockNotificationSender struct{}
-
-// SendEmail يرسل إيميل
-func (m *MockNotificationSender) SendEmail(to, subject, body string) error {
-	// محاكاة بسيطة - في التنفيذ الحقيقي يجب إرسال الإيميل فعلياً
-	return nil
-}
-
-// SendSMS يرسل SMS
-func (m *MockNotificationSender) SendSMS(to, message string) error {
-	// محاكاة بسيطة - في التنفيذ الحقيقي يجب إرسال SMS فعلياً
-	return nil
-}
-
-// SendPush يرسل إشعار push
-func (m *MockNotificationSender) SendPush(to, title, body string) error {
-	// محاكاة بسيطة - في التنفيذ الحقيقي يجب إرسال push فعلياً
-	return nil
-}
-
-// SendWebhook يرسل webhook
-func (m *MockNotificationSender) SendWebhook(url string, data interface{}) error {
-	// محاكاة بسيطة - في التنفيذ الحقيقي يجب إرسال webhook فعلياً
-	return nil
-}
-
 // NewNotificationsIntegrator ينشئ تكاملاً جديداً للإشعارات
 func NewNotificationsIntegrator(logger *zap.Logger, eventBus *eventbus.EventBus) *NotificationsIntegrator {
 	// إنشاء محول لـ EventBus
 	adapter := &EventBusAdapter{eb: eventBus}
 	
-	// إنشاء محاكي لـ NotificationSender
-	sender := &MockNotificationSender{}
+	// إنشاء مرسل إشعارات حقيقي ينشر الأحداث عبر EventBus
+	sender := core.NewEventBusNotificationSender(eventBus)
 	
 	// إنشاء NotificationManager
 	manager := core.NewNotificationManager(logger, sender, adapter)

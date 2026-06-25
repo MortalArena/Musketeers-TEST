@@ -1,1 +1,0 @@
-{"id":"575b0c9c-82c2-45f7-b332-de1078b8d09c","timestamp":"2026-06-24T14:15:01.2881342+03:00","type":"session.created","source_id":"did:test:123","source_type":"human","summary":"تم إنشاء الجلسة","details":{"description":"Test session for chat connector","max_agents":10,"name":"Test Session","owner":"did:test:123"},"session_id":"sess_bde5ee8d-6b77-4963-a6ef-46c0dd4923b9"}

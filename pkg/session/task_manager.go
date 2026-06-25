@@ -68,7 +68,7 @@ type ManagedTask struct {
 	CompletedAt *time.Time             `json:"completed_at,omitempty"`
 	Timeout     time.Duration          `json:"timeout"`
 	Metadata    map[string]interface{} `json:"metadata"`
-	heapIndex   int                    `index في الـ Heap لإزالة فعالة`
+	heapIndex   int // index في الـ Heap لإزالة فعالة
 }
 
 // TaskHeap كومة الأولويات للمهام

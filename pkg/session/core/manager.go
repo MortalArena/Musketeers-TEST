@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -112,7 +113,7 @@ func (usm *UnifiedSessionManager) CreateSession(ctx context.Context, name, owner
 		return nil, fmt.Errorf("maximum sessions limit reached (%d)", MaxSessions)
 	}
 
-	sessionID := fmt.Sprintf("sess_%d", time.Now().UnixNano())
+	sessionID := fmt.Sprintf("sess_%s_%d", uuid.New().String()[:8], time.Now().UnixNano())
 
 	session := &SessionInfo{
 		ID:              sessionID,

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -8,7 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -165,7 +168,7 @@ func (te *ToolExecutor) ExecuteTool(ctx context.Context, taskID, toolName string
 // [HOW] يحاول أولاً من الأدوات المدمجة، ثم من registry
 // [SAFETY] يستخدم context للإلغاء
 func (te *ToolExecutor) executeToolInternal(ctx context.Context, toolName string, params map[string]interface{}) (interface{}, error) {
-	// [HOW] الأدوات المدمجة (عمليات ملفات + HTTP)
+	// [HOW] الأدوات المدمجة (عمليات ملفات + HTTP + بحث)
 	switch toolName {
 	case "read_file":
 		return te.readFile(ctx, params)
@@ -177,6 +180,18 @@ func (te *ToolExecutor) executeToolInternal(ctx context.Context, toolName string
 		return te.deleteFile(ctx, params)
 	case "http_request":
 		return te.httpRequest(ctx, params)
+	case "web_search":
+		return te.webSearch(ctx, params)
+	case "file_search":
+		return te.fileSearch(ctx, params)
+	case "content_grep":
+		return te.contentGrep(ctx, params)
+	case "edit_file":
+		return te.editFile(ctx, params)
+	case "run_tests":
+		return te.runTests(ctx, params)
+	case "git_operation":
+		return te.gitOperation(ctx, params)
 	}
 
 	// [HOW] إذا كانت الأداة مسجلة في registry، ننفذها عبر handler
@@ -430,6 +445,399 @@ func (te *ToolExecutor) httpRequest(ctx context.Context, params map[string]inter
 	return map[string]interface{}{
 		"status_code": resp.StatusCode,
 		"body":        string(body),
+	}, nil
+}
+
+// ============================================================
+// أدوات البحث
+// ============================================================
+
+func (te *ToolExecutor) webSearch(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	query, ok := params["query"].(string)
+	if !ok {
+		return nil, fmt.Errorf("المعامل query مطلوب")
+	}
+	// البحث عبر HTTP GET لمحرك بحث عام (DuckDuckGo)
+	searchURL := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json&no_html=1", url.QueryEscape(query))
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Musketeers-Agent/1.0")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("فشل البحث: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"query":   query,
+		"results": string(body),
+		"source":  "duckduckgo",
+	}, nil
+}
+
+func (te *ToolExecutor) fileSearch(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	pattern, ok := params["pattern"].(string)
+	if !ok {
+		return nil, fmt.Errorf("المعامل pattern مطلوب")
+	}
+	root, _ := params["path"].(string)
+	if root == "" {
+		root = "."
+	}
+	absRoot := filepath.Join(te.AllowedBasePath, root)
+	if !te.isPathAllowed(root) {
+		return nil, fmt.Errorf("المسار غير مسموح: %s", root)
+	}
+	matches := make([]string, 0)
+	err := filepath.WalkDir(absRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			// تجاهل المجلدات المخفية والمجلدات النظامية
+			if strings.HasPrefix(d.Name(), ".") || d.Name() == "node_modules" || d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.Contains(d.Name(), pattern) {
+			rel, _ := filepath.Rel(te.AllowedBasePath, path)
+			matches = append(matches, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("فشل البحث في الملفات: %w", err)
+	}
+	return map[string]interface{}{
+		"pattern": pattern,
+		"matches": matches,
+		"count":   len(matches),
+	}, nil
+}
+
+// ============================================================
+// أدوات جديدة: content_grep, edit_file, run_tests, git_operation
+// ============================================================
+
+func (te *ToolExecutor) contentGrep(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	pattern, ok := params["pattern"].(string)
+	if !ok {
+		return nil, fmt.Errorf("المعامل pattern مطلوب (regex)")
+	}
+	root, _ := params["path"].(string)
+	if root == "" {
+		root = "."
+	}
+	includePattern, _ := params["include"].(string)
+	absRoot := filepath.Join(te.AllowedBasePath, root)
+	if !te.isPathAllowed(root) {
+		return nil, fmt.Errorf("المسار غير مسموح: %s", root)
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("نمط regex غير صالح: %w", err)
+	}
+	type match struct {
+		File    string `json:"file"`
+		Line    int    `json:"line"`
+		Content string `json:"content"`
+	}
+	results := make([]match, 0)
+	err = filepath.WalkDir(absRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") || d.Name() == "node_modules" || d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if includePattern != "" {
+			if matched, _ := filepath.Match(includePattern, d.Name()); !matched {
+				return nil
+			}
+		}
+		rel, _ := filepath.Rel(te.AllowedBasePath, path)
+		file, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer file.Close()
+		scanner := bufio.NewScanner(file)
+		lineNum := 0
+		for scanner.Scan() {
+			lineNum++
+			line := scanner.Text()
+			if re.MatchString(line) {
+				results = append(results, match{File: rel, Line: lineNum, Content: strings.TrimSpace(line)})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("فشل البحث في المحتوى: %w", err)
+	}
+	return map[string]interface{}{
+		"pattern": pattern,
+		"results": results,
+		"count":   len(results),
+	}, nil
+}
+
+func (te *ToolExecutor) editFile(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	path, ok := params["path"].(string)
+	if !ok {
+		return nil, fmt.Errorf("المعامل path مطلوب")
+	}
+	operation, _ := params["operation"].(string)
+	absPath := filepath.Join(te.AllowedBasePath, path)
+	if !te.isPathAllowed(path) {
+		return nil, fmt.Errorf("المسار غير مسموح: %s", path)
+	}
+
+	switch operation {
+	case "read":
+		data, err := te.readFileWithContext(ctx, absPath)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"content": string(data),
+			"path":    path,
+		}, nil
+
+	case "append":
+		content, ok := params["content"].(string)
+		if !ok {
+			return nil, fmt.Errorf("المعامل content مطلوب لعملية append")
+		}
+		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+			return nil, fmt.Errorf("فشل إنشاء المجلد: %w", err)
+		}
+		file, err := os.OpenFile(absPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("فشل فتح الملف: %w", err)
+		}
+		defer file.Close()
+		if _, err := file.WriteString(content); err != nil {
+			return nil, fmt.Errorf("فشل الكتابة: %w", err)
+		}
+		return map[string]interface{}{
+			"success": true,
+			"path":    path,
+			"action":  "append",
+		}, nil
+
+	case "replace":
+		oldStr, ok := params["old"].(string)
+		if !ok {
+			return nil, fmt.Errorf("المعامل old مطلوب لعملية replace")
+		}
+		newStr, ok2 := params["new"].(string)
+		if !ok2 {
+			return nil, fmt.Errorf("المعامل new مطلوب لعملية replace")
+		}
+		// قراءة الملف
+		data, err := te.readFileWithContext(ctx, absPath)
+		if err != nil {
+			return nil, err
+		}
+		oldContent := string(data)
+		if !strings.Contains(oldContent, oldStr) {
+			return nil, fmt.Errorf("النص المطلوب استبداله غير موجود في الملف")
+		}
+		newContent := strings.ReplaceAll(oldContent, oldStr, newStr)
+		// إنشاء نسخة احتياطية
+		backupPath := absPath + ".bak"
+		if err := te.writeFileWithContext(ctx, backupPath, data); err != nil {
+			return nil, fmt.Errorf("فشل إنشاء نسخة احتياطية: %w", err)
+		}
+		// كتابة المحتوى الجديد
+		if err := te.writeFileWithContext(ctx, absPath, []byte(newContent)); err != nil {
+			// استعادة النسخة الاحتياطية إذا فشلت الكتابة
+			restore, _ := os.ReadFile(backupPath)
+			os.WriteFile(absPath, restore, 0644)
+			return nil, fmt.Errorf("فشل كتابة الملف بعد الاستبدال: %w", err)
+		}
+		return map[string]interface{}{
+			"success":      true,
+			"path":         path,
+			"backup_path":  path + ".bak",
+			"action":       "replace",
+			"replacements": strings.Count(oldContent, oldStr),
+		}, nil
+
+	default:
+		// كتابة كاملة (السلوك الافتراضي)
+		content, ok := params["content"].(string)
+		if !ok {
+			return nil, fmt.Errorf("المعامل content مطلوب")
+		}
+		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+			return nil, fmt.Errorf("فشل إنشاء المجلد: %w", err)
+		}
+		if err := te.writeFileWithContext(ctx, absPath, []byte(content)); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"success": true,
+			"path":    path,
+			"action":  "write",
+		}, nil
+	}
+}
+
+func (te *ToolExecutor) runTests(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	command, ok := params["command"].(string)
+	if !ok {
+		command = "go test ./..."
+	}
+	dir, _ := params["dir"].(string)
+	timeoutSec := 300
+	if t, ok := params["timeout"].(float64); ok && t > 0 {
+		timeoutSec = int(t)
+	}
+	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+	runDir := te.AllowedBasePath
+	if dir != "" {
+		absDir := filepath.Join(te.AllowedBasePath, dir)
+		runDir = absDir
+	}
+	cmd := exec.CommandContext(execCtx, "cmd", "/C", command)
+	cmd.Dir = runDir
+	output, err := cmd.CombinedOutput()
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+	return map[string]interface{}{
+		"command":   command,
+		"output":    string(output),
+		"exit_code": exitCode,
+		"success":   exitCode == 0,
+	}, nil
+}
+
+func (te *ToolExecutor) gitOperation(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	operation, ok := params["operation"].(string)
+	if !ok {
+		return nil, fmt.Errorf("المعامل operation مطلوب (clone, add, commit, push, pull, branch, checkout, status, log)")
+	}
+	dir, _ := params["dir"].(string)
+	runDir := te.AllowedBasePath
+	if dir != "" {
+		runDir = filepath.Join(te.AllowedBasePath, dir)
+	}
+	var cmd *exec.Cmd
+	switch operation {
+	case "status":
+		cmd = exec.CommandContext(ctx, "git", "-C", runDir, "status")
+	case "log":
+		limit := 10
+		if l, ok := params["limit"].(float64); ok {
+			limit = int(l)
+		}
+		cmd = exec.CommandContext(ctx, "git", "-C", runDir, "log", fmt.Sprintf("--max-count=%d", limit), "--oneline")
+	case "add":
+		files, _ := params["files"].(string)
+		if files == "" {
+			files = "."
+		}
+		cmd = exec.CommandContext(ctx, "git", "-C", runDir, "add", files)
+	case "commit":
+		message, _ := params["message"].(string)
+		if message == "" {
+			return nil, fmt.Errorf("المعامل message مطلوب لعملية commit")
+		}
+		cmd = exec.CommandContext(ctx, "git", "-C", runDir, "commit", "-m", message)
+	case "push":
+		remote, _ := params["remote"].(string)
+		branch, _ := params["branch"].(string)
+		args := []string{"-C", runDir, "push"}
+		if remote != "" {
+			args = append(args, remote)
+		}
+		if branch != "" {
+			args = append(args, branch)
+		}
+		cmd = exec.CommandContext(ctx, "git", args...)
+	case "pull":
+		remote, _ := params["remote"].(string)
+		branch, _ := params["branch"].(string)
+		args := []string{"-C", runDir, "pull"}
+		if remote != "" {
+			args = append(args, remote)
+		}
+		if branch != "" {
+			args = append(args, branch)
+		}
+		cmd = exec.CommandContext(ctx, "git", args...)
+	case "branch":
+		branchName, _ := params["branch"].(string)
+		action, _ := params["git_action"].(string)
+		args := []string{"-C", runDir, "branch"}
+		if action == "create" && branchName != "" {
+			args = append(args, branchName)
+		} else if action == "delete" && branchName != "" {
+			args = append(args, "-d", branchName)
+		} else if action == "list" {
+			// فقط git branch
+		}
+		cmd = exec.CommandContext(ctx, "git", args...)
+	case "checkout":
+		branch, _ := params["branch"].(string)
+		if branch == "" {
+			return nil, fmt.Errorf("المعامل branch مطلوب لعملية checkout")
+		}
+		create, _ := params["create"].(bool)
+		args := []string{"-C", runDir, "checkout"}
+		if create {
+			args = append(args, "-b")
+		}
+		args = append(args, branch)
+		cmd = exec.CommandContext(ctx, "git", args...)
+	case "diff":
+		argsParam, _ := params["args"].(string)
+		args := []string{"-C", runDir, "diff"}
+		if argsParam != "" {
+			args = append(args, strings.Fields(argsParam)...)
+		}
+		cmd = exec.CommandContext(ctx, "git", args...)
+	default:
+		argsParam, _ := params["args"].(string)
+		args := []string{"-C", runDir, operation}
+		if argsParam != "" {
+			args = append(args, strings.Fields(argsParam)...)
+		}
+		cmd = exec.CommandContext(ctx, "git", args...)
+	}
+	output, err := cmd.CombinedOutput()
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+	return map[string]interface{}{
+		"operation": operation,
+		"output":    string(output),
+		"exit_code": exitCode,
+		"success":   exitCode == 0,
 	}, nil
 }
 

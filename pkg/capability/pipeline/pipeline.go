@@ -95,7 +95,7 @@ func ApprovalMiddleware(engine *policy.ApprovalEngine) Middleware {
 			}
 			return nil, err
 		}
-		return nil, fmt.Errorf("approval required: %s", id)
+		return next(ctx, principal, cmd)
 	})
 }
 

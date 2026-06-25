@@ -2,9 +2,11 @@ package core
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/MortalArena/Musketeers/pkg/eventbus"
 	"go.uber.org/zap"
 )
 
@@ -24,6 +26,62 @@ type NotificationSender interface {
 	SendSMS(to, message string) error
 	SendPush(to, title, body string) error
 	SendWebhook(url string, data interface{}) error
+}
+
+// EventBusNotificationSender مرسل إشعارات حقيقي ينشر الأحداث عبر EventBus
+type EventBusNotificationSender struct {
+	eb *eventbus.EventBus
+}
+
+// NewEventBusNotificationSender ينشئ مرسل إشعارات جديد
+func NewEventBusNotificationSender(eb *eventbus.EventBus) *EventBusNotificationSender {
+	return &EventBusNotificationSender{eb: eb}
+}
+
+func (s *EventBusNotificationSender) SendEmail(to, subject, body string) error {
+	s.eb.Publish(eventbus.Event{
+		Type: "notification.email",
+		Payload: map[string]interface{}{
+			"to":      to,
+			"subject": subject,
+			"body":    body,
+		},
+	})
+	return nil
+}
+
+func (s *EventBusNotificationSender) SendSMS(to, message string) error {
+	s.eb.Publish(eventbus.Event{
+		Type: "notification.sms",
+		Payload: map[string]interface{}{
+			"to":      to,
+			"message": message,
+		},
+	})
+	return nil
+}
+
+func (s *EventBusNotificationSender) SendPush(to, title, body string) error {
+	s.eb.Publish(eventbus.Event{
+		Type: "notification.push",
+		Payload: map[string]interface{}{
+			"to":    to,
+			"title": title,
+			"body":  body,
+		},
+	})
+	return nil
+}
+
+func (s *EventBusNotificationSender) SendWebhook(url string, data interface{}) error {
+	s.eb.Publish(eventbus.Event{
+		Type: "notification.webhook",
+		Payload: map[string]interface{}{
+			"url":  url,
+			"data": data,
+		},
+	})
+	return nil
 }
 
 // EventBus واجهة ناقل الأحداث
@@ -356,7 +414,5 @@ func (nm *NotificationManager) GetSummary() map[string]interface{} {
 
 // replacePlaceholder يستبدل placeholder في النص
 func replacePlaceholder(text, placeholder, value string) string {
-	// تنفيذ بسيط لاستبدال placeholder
-	// في التطبيق الحقيقي، يجب استخدام مكتبة قوالب مثل text/template
-	return text
+	return strings.ReplaceAll(text, placeholder, value)
 }

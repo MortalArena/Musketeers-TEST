@@ -153,7 +153,7 @@ func (r *FreeRouter) executeWithRetry(ctx context.Context, provider Provider, re
 		if r.config.Timeout > 0 {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(ctx, r.config.Timeout)
-			defer cancel()
+			cancel()
 		}
 
 		resp, err := provider.Complete(ctx, req)

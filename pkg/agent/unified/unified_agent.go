@@ -304,33 +304,92 @@ func (ua *UnifiedAgent) connectThinkingEngineToSession(ctx context.Context) erro
 	return nil
 }
 
-// connectMemoryAndSkillComponents يربط مكونات الذاكرة والمهارات
+// connectMemoryAndSkillComponents يربط مكونات الذاكرة والمهارات من الجلسة الحقيقية
 func (ua *UnifiedAgent) connectMemoryAndSkillComponents(ctx context.Context) error {
-	// ربط CollectiveMemory من UnifiedMemoryManager عبر adaptor
-	if ua.unifiedMemoryManager != nil {
+	// استخدام CollectiveMemory من SessionContainer الحقيقي إذا كان متاحاً
+	if ua.sessionContainer != nil && ua.sessionContainer.Memory != nil {
+		collectiveMemoryAdaptor := thinking.NewCollectiveMemoryAdaptor(ua.sessionContainer.Memory)
+		ua.thinkingEngine.SetCollectiveMemory(collectiveMemoryAdaptor)
+		ua.logger.Info("ربط ThinkingEngine بـ CollectiveMemory من SessionContainer الحقيقي")
+	} else if ua.unifiedMemoryManager != nil {
+		// fallback: إنشاء جديد
 		sessionCollectiveMemory := session.NewCollectiveMemory(ua.sessionID, nil)
 		if sessionCollectiveMemory != nil {
 			collectiveMemoryAdaptor := thinking.NewCollectiveMemoryAdaptor(sessionCollectiveMemory)
 			ua.thinkingEngine.SetCollectiveMemory(collectiveMemoryAdaptor)
-			ua.logger.Info("ربط ThinkingEngine بـ CollectiveMemory عبر adaptor")
+			ua.logger.Info("ربط ThinkingEngine بـ CollectiveMemory عبر adaptor (fallback)")
 		}
 	}
 
-	// ربط SkillsManager من UnifiedSkillManager عبر adaptor
-	if ua.unifiedSkillManager != nil {
+	// استخدام SkillsManager من SessionContainer الحقيقي إذا كان متاحاً
+	if ua.sessionContainer != nil && ua.sessionContainer.Skills != nil {
+		skillsManagerAdaptor := thinking.NewSkillsManagerAdaptor(ua.sessionContainer.Skills)
+		ua.thinkingEngine.SetSkillsManager(skillsManagerAdaptor)
+		ua.logger.Info("ربط ThinkingEngine بـ SkillsManager من SessionContainer الحقيقي")
+	} else if ua.unifiedSkillManager != nil {
+		// fallback: إنشاء جديد
 		sessionSkillsManager := session.NewSkillsManager(ua.sessionID)
 		if sessionSkillsManager != nil {
 			skillsManagerAdaptor := thinking.NewSkillsManagerAdaptor(sessionSkillsManager)
 			ua.thinkingEngine.SetSkillsManager(skillsManagerAdaptor)
-			ua.logger.Info("ربط ThinkingEngine بـ SkillsManager عبر adaptor")
+			ua.logger.Info("ربط ThinkingEngine بـ SkillsManager عبر adaptor (fallback)")
 		}
 	}
 
 	return nil
 }
 
-// connectSessionContainer يربط SessionContainer
+// connectSessionContainer يربط SessionContainer — يستخدم الحقيقي إذا وُجد
 func (ua *UnifiedAgent) connectSessionContainer(ctx context.Context) error {
+	// استخدام SessionContainer الحقيقي من main.go إذا كان مضبوطاً
+	if ua.sessionContainer != nil {
+		sc := ua.sessionContainer
+		ua.logger.Info("استخدام SessionContainer الحقيقي من main.go",
+			zap.String("session_id", sc.ID))
+
+		// ربط SessionJournal مع ThinkingEngine
+		if sc.Journal != nil {
+			sessionJournalAdaptor := thinking.NewSessionJournalAdaptor(sc.Journal)
+			ua.thinkingEngine.SetSessionJournal(sessionJournalAdaptor)
+			ua.logger.Info("ربط ThinkingEngine بـ SessionJournal الحقيقي")
+		}
+
+		// ربط SessionContainer مع ThinkingEngine
+		sessionContainerAdaptor := thinking.NewSessionContainerAdaptor(sc)
+		ua.thinkingEngine.SetSessionContainer(sessionContainerAdaptor)
+		ua.logger.Info("ربط ThinkingEngine بـ SessionContainer الحقيقي")
+
+		// ربط WorkflowEngine الحقيقي وتعيين StepExecutor (ThinkingEngine)
+		if sc.Workflow != nil {
+			// تعيين ThinkingEngine كمنفذ للخطوات
+			sc.Workflow.SetStepExecutor(ua.thinkingEngine)
+			ua.thinkingEngine.SetWorkflowEngine(sc.Workflow)
+			ua.logger.Info("ربط ThinkingEngine بـ WorkflowEngine الحقيقي وتعيين StepExecutor")
+		}
+
+		// ربط EventBus الحقيقي
+		if sc.EventBus != nil {
+			// استخدام EventBus الحقيقي للجلسة
+			ua.logger.Info("EventBus الحقيقي متاح للجلسة")
+		}
+
+		// ربط TaskManager الحقيقي
+		if sc.Tasks != nil {
+			taskManagerAdaptor := thinking.NewTaskManagerAdaptor(sc.Tasks)
+			ua.thinkingEngine.SetTaskManager(taskManagerAdaptor)
+			ua.logger.Info("ربط ThinkingEngine بـ TaskManager الحقيقي")
+		}
+
+		// [FIX] ربط ToolRegistry الحقيقي من SessionContainer بـ ToolExecutor
+		if sc.ToolRegistry != nil && ua.toolExecutor != nil {
+			ua.toolExecutor.SetRegistry(sc.ToolRegistry)
+			ua.logger.Info("ربط ToolExecutor بـ ToolRegistry الحقيقي من SessionContainer")
+		}
+
+		return nil
+	}
+
+	// fallback: إنشاء SessionContainer جديد (قديم)
 	sessionConfig := &session.SessionConfig{
 		Name:        "Unified Agent Session",
 		Description: "Session managed by UnifiedAgent",
@@ -338,30 +397,22 @@ func (ua *UnifiedAgent) connectSessionContainer(ctx context.Context) error {
 	}
 	sessionContainer, err := session.NewSessionContainer(ctx, nil, sessionConfig, nil)
 	if err == nil && sessionContainer != nil {
-		// حفظ مرجع للـ SessionContainer في UnifiedAgent
 		ua.sessionContainer = sessionContainer
 
-		// ربط SessionJournal مع ThinkingEngine
 		if sessionContainer.Journal != nil {
 			sessionJournalAdaptor := thinking.NewSessionJournalAdaptor(sessionContainer.Journal)
 			ua.thinkingEngine.SetSessionJournal(sessionJournalAdaptor)
-			ua.logger.Info("ربط ThinkingEngine بـ SessionJournal عبر adaptor")
 		}
 
-		// ربط SessionContainer مع ThinkingEngine
 		sessionContainerAdaptor := thinking.NewSessionContainerAdaptor(sessionContainer)
 		ua.thinkingEngine.SetSessionContainer(sessionContainerAdaptor)
-		ua.logger.Info("ربط ThinkingEngine بـ SessionContainer عبر adaptor")
 
-		// ربط WorkflowEngine الحقيقي مع ThinkingEngine
 		if sessionContainer.Workflow != nil {
+			sessionContainer.Workflow.SetStepExecutor(ua.thinkingEngine)
 			ua.thinkingEngine.SetWorkflowEngine(sessionContainer.Workflow)
-			ua.logger.Info("ربط ThinkingEngine بـ WorkflowEngine الحقيقي من pkg/session/workflow.go")
 		} else {
-			// استخدام adaptor كحل احتياطي
 			workflowAdaptor := thinking.NewWorkflowAdaptor(nil)
 			ua.thinkingEngine.SetWorkflow(workflowAdaptor)
-			ua.logger.Info("ربط ThinkingEngine بـ Workflow عبر adaptor (احتياطي)")
 		}
 	} else {
 		ua.logger.Warn("فشل إنشاء SessionContainer", zap.Error(err))
@@ -432,8 +483,12 @@ func (ua *UnifiedAgent) connectDistributedComponents(ctx context.Context) error 
 // connectRuntimeIntegration يربط RuntimeIntegration
 func (ua *UnifiedAgent) connectRuntimeIntegration(ctx context.Context) error {
 	if ua.toolExecutor != nil {
+		// ربط ToolExecutor في مسارين:
+		// 1. RuntimeIntegration.ExecuteTool (عبر واجهة interface{})
 		ua.thinkingEngine.SetRuntimeIntegrationToolExecutor(ua.toolExecutor)
-		ua.logger.Info("ربط RuntimeIntegration بـ ToolExecutor")
+		// 2. ThinkingEngine.toolExecutor (ليستخدم مباشرة في stepExecuteTools)
+		ua.thinkingEngine.SetToolExecutor(ua.toolExecutor)
+		ua.logger.Info("ربط RuntimeIntegration و ThinkingEngine بـ ToolExecutor")
 	}
 	return nil
 }
@@ -753,6 +808,23 @@ func (ua *UnifiedAgent) SetToolExecutor(executor *tools.ToolExecutor) {
 
 	ua.toolExecutor = executor
 	ua.logger.Info("Tool executor set")
+}
+
+// SetRealSessionContainer يضبط SessionContainer الحقيقي (من main.go) لاستخدامه بدلاً من إنشاء واحد جديد
+func (ua *UnifiedAgent) SetRealSessionContainer(container *session.SessionContainer) {
+	ua.mu.Lock()
+	defer ua.mu.Unlock()
+
+	ua.sessionContainer = container
+
+	// [FIX] ربط CollectiveAgentSystem بـ SessionContainer الحقيقي
+	if ua.collectiveSystem != nil {
+		ua.collectiveSystem.SetSessionContainer(container)
+		ua.logger.Info("ربط CollectiveAgentSystem بـ SessionContainer الحقيقي")
+	}
+
+	ua.logger.Info("Real SessionContainer set from main.go",
+		zap.String("session_id", container.ID))
 }
 
 // GetSystemSummary يحصل على ملخص النظام الموحد

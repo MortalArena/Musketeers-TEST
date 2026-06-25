@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -20,14 +21,37 @@ type AgentContext struct {
 	Environment map[string]string
 }
 
+// AgentSkill مهارات وكيل واحد (من core)
+type AgentSkill struct {
+	AgentDID        string            `json:"agent_did"`
+	AgentType       string            `json:"agent_type"`
+	OverallLevel    int               `json:"overall_level"`
+	Skills          map[string]*Skill `json:"skills"`
+	TotalTasks      int               `json:"total_tasks"`
+	SuccessCount    int               `json:"success_count"`
+	FailureCount    int               `json:"failure_count"`
+	AvgTaskTime     string            `json:"avg_task_time"`
+	MasteryBadges   []string          `json:"mastery_badges"`
+	Specializations []string          `json:"specializations"`
+	LastEvolution   string            `json:"last_evolution"`
+	EvolutionCount  int               `json:"evolution_count"`
+}
+
 // SkillManager يدير المهارات للوكلاء بناءً على نظام Cursor
 type SkillManager struct {
+	sessionID string
 	skills    map[string]*Skill
 	loader    *SkillLoader
 	executor  *SkillExecutor
 	logger    *zap.Logger
 	mu        sync.RWMutex
 	skillDirs []string
+
+	// Agent skills tracking (من core)
+	agentSkills map[string]*AgentSkill
+	totalSkills    int
+	enabledSkills  int
+	disabledSkills int
 }
 
 // Skill يمثل مهارة واحدة
@@ -40,6 +64,8 @@ type Skill struct {
 	Metadata               map[string]interface{} `json:"metadata"`
 	Disabled               bool                   `json:"disabled"`
 	DisableModelInvocation bool                   `json:"disable_model_invocation"`
+	Level                  int                    `json:"level"`
+	Experience             int                    `json:"experience"`
 }
 
 // SkillLoader يحمل المهارات من الملفات
@@ -54,12 +80,19 @@ type SkillExecutor struct {
 
 // NewSkillManager ينشئ مدير مهارات جديد
 func NewSkillManager(logger *zap.Logger) *SkillManager {
+	return NewSkillManagerWithSession("", logger)
+}
+
+// NewSkillManagerWithSession ينشئ مدير مهارات مع معرف الجلسة (يدعم AgentSkill)
+func NewSkillManagerWithSession(sessionID string, logger *zap.Logger) *SkillManager {
 	sm := &SkillManager{
-		skills:    make(map[string]*Skill),
-		loader:    NewSkillLoader(logger),
-		executor:  NewSkillExecutor(logger),
-		logger:    logger,
-		skillDirs: []string{},
+		sessionID:   sessionID,
+		skills:      make(map[string]*Skill),
+		loader:      NewSkillLoader(logger),
+		executor:    NewSkillExecutor(logger),
+		logger:      logger,
+		skillDirs:   []string{},
+		agentSkills: make(map[string]*AgentSkill),
 	}
 	return sm
 }
@@ -131,6 +164,12 @@ func (sm *SkillManager) loadSkillsFromDir(dir string) error {
 			}
 
 			sm.skills[skill.Name] = skill
+			sm.totalSkills++
+			if !skill.Disabled {
+				sm.enabledSkills++
+			} else {
+				sm.disabledSkills++
+			}
 			sm.logger.Info("تم تحميل مهارة",
 				zap.String("name", skill.Name),
 				zap.String("description", skill.Description))
@@ -382,6 +421,72 @@ type SkillResult struct {
 	Error     string                 `json:"error,omitempty"`
 }
 
+// RegisterAgent يسجل وكيلاً ويمنحه مهارات ابتدائية (من core)
+func (sm *SkillManager) RegisterAgent(agentDID, agentType string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if _, exists := sm.agentSkills[agentDID]; exists {
+		return fmt.Errorf("الوكيل مسجل بالفعل")
+	}
+
+	askill := &AgentSkill{
+		AgentDID:      agentDID,
+		AgentType:     agentType,
+		OverallLevel:  50,
+		Skills:        make(map[string]*Skill),
+		LastEvolution: getCurrentTimestamp(),
+	}
+
+	switch agentType {
+	case "coder":
+		askill.Skills["python"] = &Skill{Name: "Python", Level: 70, Experience: 1000}
+		askill.Skills["javascript"] = &Skill{Name: "JavaScript", Level: 70, Experience: 1000}
+		askill.Skills["database"] = &Skill{Name: "Database Design", Level: 60, Experience: 500}
+		askill.Specializations = []string{"backend", "fullstack"}
+	case "designer":
+		askill.Skills["ui_design"] = &Skill{Name: "UI Design", Level: 75, Experience: 1200}
+		askill.Skills["ux_research"] = &Skill{Name: "UX Research", Level: 70, Experience: 1000}
+		askill.Skills["figma"] = &Skill{Name: "Figma", Level: 80, Experience: 1500}
+		askill.Specializations = []string{"web", "mobile"}
+	case "tester":
+		askill.Skills["unit_testing"] = &Skill{Name: "Unit Testing", Level: 80, Experience: 1500}
+		askill.Skills["integration_testing"] = &Skill{Name: "Integration Testing", Level: 75, Experience: 1200}
+		askill.Skills["security_testing"] = &Skill{Name: "Security Testing", Level: 75, Experience: 1200}
+		askill.Specializations = []string{"qa", "automation"}
+	}
+
+	sm.agentSkills[agentDID] = askill
+	sm.logger.Info("تم تسجيل وكيل", zap.String("agent_did", agentDID), zap.String("agent_type", agentType))
+	return nil
+}
+
+// GetAgentSkill يحصل على مهارات وكيل (من core)
+func (sm *SkillManager) GetAgentSkill(agentDID string) (*AgentSkill, error) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	askill, exists := sm.agentSkills[agentDID]
+	if !exists {
+		return nil, fmt.Errorf("الوكيل غير مسجل")
+	}
+	return askill, nil
+}
+
+// GetSummary يحصل على ملخص المهارات
+func (sm *SkillManager) GetSummary() map[string]interface{} {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	return map[string]interface{}{
+		"session_id":        sm.sessionID,
+		"total_skills":      sm.totalSkills,
+		"enabled_skills":    sm.enabledSkills,
+		"disabled_skills":   sm.disabledSkills,
+		"registered_agents": len(sm.agentSkills),
+	}
+}
+
 // GetSkillSummary يحصل على ملخص المهارات
 func (sm *SkillManager) GetSkillSummary() map[string]interface{} {
 	sm.mu.RLock()
@@ -403,4 +508,8 @@ func (sm *SkillManager) GetSkillSummary() map[string]interface{} {
 	}
 
 	return summary
+}
+
+func getCurrentTimestamp() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
 }

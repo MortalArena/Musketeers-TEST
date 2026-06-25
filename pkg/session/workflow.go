@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+// StepExecutor واجهة لتنفيذ خطوات الـ 16 workflow فعلياً عبر ThinkingEngine
+type StepExecutor interface {
+	ExecuteStep(ctx context.Context, stepIndex int, task string, workflowState map[string]interface{}) (map[string]interface{}, error)
+}
+
 // WorkflowStepType أنواع الخطوات القياسية الـ 16
 type WorkflowStepType string
 
@@ -39,6 +44,7 @@ type WorkflowEngine struct {
 	State            string            `json:"state"`    // idle, running, paused, completed
 	StartedAt        time.Time         `json:"started_at"`
 	UpdatedAt        time.Time         `json:"updated_at"`
+	StepExecutor     StepExecutor      `json:"-"` // منفذ الخطوات الفعلي (ThinkingEngine)
 	mu               sync.RWMutex
 }
 
@@ -83,6 +89,20 @@ func (we *WorkflowEngine) SetSessionContainer(container *SessionContainer) {
 	we.mu.Lock()
 	defer we.mu.Unlock()
 	we.SessionContainer = container
+}
+
+// SetStepExecutor يضبط منفذ الخطوات الفعلي (ThinkingEngine)
+func (we *WorkflowEngine) SetStepExecutor(executor StepExecutor) {
+	we.mu.Lock()
+	defer we.mu.Unlock()
+	we.StepExecutor = executor
+}
+
+// GetStepExecutor يرجع منفذ الخطوات الفعلي
+func (we *WorkflowEngine) GetStepExecutor() StepExecutor {
+	we.mu.RLock()
+	defer we.mu.RUnlock()
+	return we.StepExecutor
 }
 
 // GetSessionContainer يرجع مرجع الحاوية
@@ -270,11 +290,13 @@ func (we *WorkflowEngine) Execute16StepWorkflow(ctx context.Context, task string
 	return workflowState, nil
 }
 
-// executeStep ينفذ خطوة معينة
+// executeStep ينفذ خطوة معينة عبر StepExecutor إذا كان متاحاً
 func (we *WorkflowEngine) executeStep(ctx context.Context, stepIndex int, workflowState map[string]interface{}, thinkingEngine interface{}) (map[string]interface{}, error) {
-	// استخدام ThinkingEngine للتنفيذ إذا كان متاحاً
-	// هذا سيتم تنفيذه بناءً على نوع محرك التفكير
-	// حالياً سنقوم بمحاكاة التنفيذ
+	// استخدام StepExecutor للتنفيذ الفعلي إذا كان متاحاً
+	if we.StepExecutor != nil {
+		task, _ := workflowState["task"].(string)
+		return we.StepExecutor.ExecuteStep(ctx, stepIndex, task, workflowState)
+	}
 
 	stepName := we.getStepName(stepIndex)
 	stepDescription := we.getStepDescription(stepIndex)

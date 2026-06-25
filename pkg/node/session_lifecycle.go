@@ -102,6 +102,12 @@ type SessionLifecycleCallback struct {
 	OnTaskReassign func(mappingJSON string) error
 	// Electable يتحقق مما إذا كان هذا الجهاز مؤهلاً للانتخاب
 	Electable func(backupPriority int) bool
+	// OnElectionComplete يُستدعى عندما ينتهي الانتخاب دون فائز
+	// يُعطي قائمة المرشحين للعميل البشري ليختار المدير الجديد
+	OnElectionComplete func(candidates []string)
+	// VerifyDelegation يُستدعى للتحقق من تفويض
+	// يرجع true إذا كان التفويض (token) يسمح بالعملية (action) للعقدة (nodeDID)
+	VerifyDelegation func(delegationToken string, action string, performerDID string) bool
 }
 
 // SessionLifecycleManager يدير دورة حياة الجلسة عبر الشبكة
@@ -131,9 +137,10 @@ type SessionLifecycleManager struct {
 	lastHB        map[string]time.Time
 
 	// Election
-	inElection       bool
-	electionDeadline time.Time
-	electionMu       sync.Mutex
+	inElection         bool
+	electionDeadline   time.Time
+	electionMu         sync.Mutex
+	electionCandidates []string // المرشحون في الانتخاب الحالي
 
 	// Failover
 	backupManagers []BackupEntry
@@ -430,6 +437,7 @@ func (lm *SessionLifecycleManager) startElection() {
 	}
 	lm.inElection = true
 	lm.electionDeadline = time.Now().Add(electionWaitTime)
+	lm.electionCandidates = nil
 	lm.electionMu.Unlock()
 
 	// الإعلان عن بداية الانتخاب
@@ -490,7 +498,7 @@ func (lm *SessionLifecycleManager) startElection() {
 		return
 	}
 
-	// إعلان الترشح مع دليل التفويض
+	// إعلان الترشح
 	_ = lm.sendCtrlMsg(CtrlElectAnnounce, map[string]interface{}{
 		"bpri": myPriority,
 	})
@@ -513,35 +521,38 @@ func (lm *SessionLifecycleManager) waitForElectionResult() {
 	}
 	lm.electionMu.Unlock()
 
-	// لم يصلنا إعلان مدير جديد → تحقق مرة أخرى
-	lm.mu.RLock()
-	managerOnline := false
-	if lm.managerNode != "" {
-		if p, exists := lm.participants[lm.managerNode]; exists && p.IsOnline {
-			managerOnline = true
-		}
-	}
-	lm.mu.RUnlock()
+	// لم يصلنا إعلان مدير جديد → نطلب من العميل البشري اختيار مدير
+	lm.electionMu.Lock()
+	candidates := make([]string, len(lm.electionCandidates))
+	copy(candidates, lm.electionCandidates)
+	lm.inElection = false
+	lm.electionMu.Unlock()
 
-	if !managerOnline {
-		lm.log.WithField("session_id", lm.sessionID).Warn("انتخاب فشل — لا يوجد مدير جديد")
-		lm.electionMu.Lock()
-		lm.inElection = false
-		lm.electionMu.Unlock()
+	if lm.callbacks.OnElectionComplete != nil {
+		go lm.callbacks.OnElectionComplete(candidates)
 	}
+
+	lm.log.WithFields(logrus.Fields{
+		"session_id": lm.sessionID,
+		"candidates": candidates,
+	}).Warn("انتخاب فشل — في انتظار اختيار العميل البشري للمدير الجديد")
 }
 
 // announceAsNewManager يعلن عن نفسي كمدير جديد
-func (lm *SessionLifecycleManager) announceAsNewManager() {
+func (lm *SessionLifecycleManager) announceAsNewManager(delegationToken string) {
 	lm.mu.Lock()
 	lm.myRole = RoleManager
 	lm.managerNode = lm.myNodeID
 	lm.isNewManager = true
 	lm.mu.Unlock()
 
-	_ = lm.sendCtrlMsg(CtrlNewManager, map[string]interface{}{
+	extras := map[string]interface{}{
 		"old_manager": lm.managerNode,
-	})
+	}
+	if delegationToken != "" {
+		extras["dtok"] = delegationToken
+	}
+	_ = lm.sendCtrlMsg(CtrlNewManager, extras)
 
 	// بدء إرسال heartbeats إذا لم يكن قد بدأ
 	if lm.hbTicker == nil {
@@ -553,6 +564,31 @@ func (lm *SessionLifecycleManager) announceAsNewManager() {
 	lm.log.WithField("session_id", lm.sessionID).Warn("أصبحت مدير الجلسة الجديد")
 }
 
+// AuthorizeNewManager يُستدعى من العميل البشري لتفويض مدير جلسة جديد
+// token هو التفويض الموقّع من مالك الجلسة (البشر)
+// nodeID هو معرف العقدة المفوّضة (قد تكون هذه العقدة أو غيرها)
+func (lm *SessionLifecycleManager) AuthorizeNewManager(nodeID string, delegationToken string) {
+	lm.mu.Lock()
+	lm.mu.Unlock()
+
+	if nodeID == lm.myNodeID {
+		// أنا المفوّض — أعلن نفسي
+		lm.announceAsNewManager(delegationToken)
+		return
+	}
+
+	// عقدة أخرى مفوّضة — أرسل لها الأمر
+	_ = lm.sendCtrlMsg(CtrlNewManager, map[string]interface{}{
+		"target": nodeID,
+		"dtok":   delegationToken,
+	})
+
+	lm.log.WithFields(logrus.Fields{
+		"session_id": lm.sessionID,
+		"target":     nodeID,
+	}).Warn("تم تفويض عقدة أخرى كمدير جلسة")
+}
+
 // handleElectAnnounce يعالج إعلان ترشح
 func (lm *SessionLifecycleManager) handleElectAnnounce(msg SessionCtrlMsg) {
 	lm.electionMu.Lock()
@@ -561,41 +597,25 @@ func (lm *SessionLifecycleManager) handleElectAnnounce(msg SessionCtrlMsg) {
 		return
 	}
 
-	// قبول المرشح
-	lm.inElection = false
-
-	lm.mu.Lock()
-	lm.managerNode = msg.NodeID
-	if p, exists := lm.participants[msg.NodeID]; exists {
-		p.Role = RoleManager
-		p.IsOnline = true
-		p.LastSeen = time.Now()
-	} else {
-		lm.participants[msg.NodeID] = &ParticipantInfo{
-			NodeID:   msg.NodeID,
-			DID:      msg.DID,
-			Role:     RoleManager,
-			LastSeen: time.Now(),
-			IsOnline: true,
+	// تسجيل المرشح في القائمة
+	for _, c := range lm.electionCandidates {
+		if c == msg.NodeID {
+			return // مكرر
 		}
 	}
-	lm.mu.Unlock()
-
-	// إعلان قبول المدير الجديد
-	if lm.callbacks.OnNewManager != nil {
-		go lm.callbacks.OnNewManager(msg.NodeID)
-	}
+	lm.electionCandidates = append(lm.electionCandidates, msg.NodeID)
 
 	lm.localBus.Publish(eventbus.Event{
-		Type:      "session.new_manager",
+		Type:      "session.election_candidate",
 		Source:    msg.NodeID,
 		SessionID: lm.sessionID,
 	})
 
 	lm.log.WithFields(logrus.Fields{
-		"session_id":  lm.sessionID,
-		"new_manager": msg.NodeID,
-	}).Warn("تم انتخاب مدير جلسة جديد")
+		"session_id": lm.sessionID,
+		"candidate":  msg.NodeID,
+		"total":      len(lm.electionCandidates),
+	}).Info("تسجيل مرشح لقيادة الجلسة")
 }
 
 // ============================================================
@@ -737,6 +757,18 @@ func (lm *SessionLifecycleManager) handleCtrlMessage(msg SessionCtrlMsg) {
 		lm.handleElectAnnounce(msg)
 
 	case CtrlNewManager:
+		// قبول فقط إذا كان التفويض صحيحاً أو نحن من أرسلناه
+		if msg.NodeID == lm.myNodeID {
+			// نحن من أرسلنا — نعرف أنه صحيح
+		} else if lm.callbacks.VerifyDelegation != nil && msg.DelegationToken != "" {
+			if !lm.callbacks.VerifyDelegation(msg.DelegationToken, "session.manager", msg.DID) {
+				lm.log.WithField("session_id", lm.sessionID).Warn("رفض CtrlNewManager: تفويض غير صحيح")
+				break
+			}
+		} else {
+			lm.log.WithField("session_id", lm.sessionID).Warn("رفض CtrlNewManager: لا يوجد تفويض")
+			break
+		}
 		lm.mu.Lock()
 		lm.managerNode = msg.NodeID
 		if p, exists := lm.participants[msg.NodeID]; exists {

@@ -300,7 +300,7 @@ func (seb *SessionEventBroadcaster) subscribeToEventBus() {
 	seb.eventBus.Subscribe("task.completed", seb.handleTaskCompleted)
 }
 
-// broadcastHandler يعالج البث
+// broadcastHandler يعالج البث عبر قنوات A2A
 func (seb *SessionEventBroadcaster) broadcastHandler() {
 	defer seb.wg.Done()
 
@@ -308,6 +308,29 @@ func (seb *SessionEventBroadcaster) broadcastHandler() {
 		select {
 		case <-seb.ctx.Done():
 			return
+		default:
+			seb.mu.RLock()
+			channels := make([]chan *SessionEvent, 0, len(seb.broadcastChannels))
+			for _, ch := range seb.broadcastChannels {
+				channels = append(channels, ch)
+			}
+			seb.mu.RUnlock()
+
+		for _, ch := range channels {
+			select {
+			case event := <-ch:
+				if seb.a2aMgr != nil && event != nil {
+					msg := &A2AMessage{
+						MessageID: generateChatID(),
+						SessionID: event.SessionID,
+						Type:      "session.event",
+						Context:   event.Data,
+					}
+					seb.a2aMgr.SendMessage(msg)
+				}
+			default:
+			}
+			}
 		}
 	}
 }

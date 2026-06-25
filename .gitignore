@@ -65,3 +65,14 @@ build/
 tmp/
 temp/
 *.tmp
+--verbose/
+.studio-test-*/
+
+# Session runtime artifacts
+sessions/
+pkg/**/sessions/
+
+# Analysis reports (generated)
+DEEP_ANALYSIS_REPORT.md
+DEEP_SYSTEM_INTEGRATION_ANALYSIS_REAL.md
+FIX_PLAN.md

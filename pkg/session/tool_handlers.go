@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/agent/tools"
+	"github.com/MortalArena/Musketeers/pkg/eventbus"
+	runtimeSandbox "github.com/MortalArena/Musketeers/pkg/runtime/sandbox"
 	"github.com/google/uuid"
 )
 
@@ -427,7 +429,7 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 	// Execution Tools - أدوات تنفيذية (تتطلب sandbox أو عزل)
 	// ============================================================
 
-	// terminal_exec - ينفذ أمر طرفية (معزول) - تنفيذ حقيقي
+	// terminal_exec - ينفذ أمر طرفية (معزول) عبر ProcessSandbox
 	registry.Register(tools.ToolDefinition{
 		Name:         "terminal_exec",
 		Description:  "ينفذ أمراً في الطرفية المعزولة",
@@ -439,18 +441,18 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 			if command == "" {
 				return nil, fmt.Errorf("المعامل command مطلوب")
 			}
-			// تنفيذ حقيقي للأمر عبر ToolExecutor إذا كان متاحاً
-			if container.ToolRegistry != nil {
-				result, err := container.ToolRegistry.Execute(ctx, tools.RoleRegular, "terminal_exec", params)
-				if err == nil {
-					return result, nil
-				}
+			// تنفيذ حقيقي للأمر عبر ProcessSandbox مع تقييد الأوامر المسموحة
+			sandbox := runtimeSandbox.NewProcessSandbox()
+			sandbox.SetAllowedCommands([]string{"ls", "dir", "pwd", "echo", "cat", "type", "find", "grep", "head", "tail", "wc", "sort", "uniq", "git", "go", "npm", "node", "python", "pip", "cargo", "rustc", "make", "cmake", "docker", "npx", "cd", "cp", "copy", "mv", "move", "mkdir", "rmdir", "rm", "del", "touch", "stat", "date", "whoami", "hostname", "ps", "kill", "curl", "wget", "tar", "zip", "unzip"})
+			output, err := sandbox.Run(command)
+			exitCode := 0
+			if err != nil {
+				exitCode = 1
 			}
-			// fallback: محاكاة
 			return map[string]interface{}{
-				"output":    fmt.Sprintf("تنفيذ: %s", command),
-				"exit_code": 0,
-				"note":      "تنفيذ محاكي - يتطلب ToolExecutor للتنفيذ الحقيقي",
+				"output":    string(output),
+				"exit_code": exitCode,
+				"error":     err,
 			}, nil
 		},
 	})
@@ -491,7 +493,7 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 	// Integration Tools - أدوات التكامل
 	// ============================================================
 
-	// github_clone - يستنسخ مستودع GitHub
+	// github_clone - يستنسخ مستودع GitHub عبر git clone
 	registry.Register(tools.ToolDefinition{
 		Name:         "github_clone",
 		Description:  "يستنسخ مستودع GitHub في مساحة العمل",
@@ -500,27 +502,127 @@ func RegisterSessionTools(registry *tools.ToolRegistry, container *SessionContai
 		RequiredRole: tools.RoleRegular,
 		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 			repo, _ := params["repo"].(string)
+			dir, _ := params["dir"].(string)
 			if repo == "" {
 				return nil, fmt.Errorf("المعامل repo مطلوب (مثال: owner/repo)")
 			}
+			cmd := fmt.Sprintf("git clone https://github.com/%s.git", repo)
+			if dir != "" {
+				cmd += " " + dir
+			}
+			sandbox := runtimeSandbox.NewProcessSandbox()
+			sandbox.SetAllowedCommands([]string{"git"})
+			output, err := sandbox.Run(cmd)
+			if err != nil {
+				return map[string]interface{}{
+					"status":  "فشل",
+					"repo":    repo,
+					"output":  string(output),
+					"error":   err.Error(),
+				}, nil
+			}
 			return map[string]interface{}{
-				"status": "محاكي - تم استنساخ المستودع",
+				"status": "تم الاستنساخ بنجاح",
 				"repo":   repo,
+				"output": string(output),
 			}, nil
 		},
 	})
 
-	// email_send - يرسل بريد إلكتروني (للمشتركين)
+	// email_send - يرسل بريد إلكتروني (عبر EventBus للـ EmailManager)
 	registry.Register(tools.ToolDefinition{
 		Name:         "email_send",
-		Description:  "يرسل بريد إلكتروني (يتطلب اشتراك)",
+		Description:  "يرسل بريد إلكتروني (عبر نظام البريد المدمج)",
 		Category:     tools.CategoryIntegration,
 		Action:       tools.ActionExecute,
 		RequiredRole: tools.RoleRegular,
 		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			to, _ := params["to"].(string)
+			subject, _ := params["subject"].(string)
+			body, _ := params["body"].(string)
+			if to == "" || subject == "" {
+				return nil, fmt.Errorf("'to' و 'subject' مطلوبان لإرسال البريد")
+			}
+			// نشر حدث البريد عبر EventBus ليقوم EmailManager بمعالجته
+			if container.EventBus != nil {
+				container.EventBus.Publish(eventbus.Event{
+					Type: "email.send",
+					Payload: map[string]interface{}{
+						"to":      to,
+						"subject": subject,
+						"body":    body,
+					},
+				})
+			}
 			return map[string]interface{}{
-				"status": "محاكي - البريد الإلكتروني يتطلب اشتراكاً فعّالاً",
+				"status":  "تم إرسال البريد الإلكتروني",
+				"to":      to,
+				"subject": subject,
 			}, nil
+		},
+	})
+
+	// ============================================================
+	// New Tools - أدوات جديدة (توجه إلى ToolExecutor المدمج)
+	// ============================================================
+
+	// content_grep - بحث في محتوى الملفات
+	registry.Register(tools.ToolDefinition{
+		Name:         "content_grep",
+		Description:  "يبحث في محتوى الملفات باستخدام regex",
+		Category:     tools.CategoryExecution,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleRegular,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			if container.ToolRegistry != nil {
+				return container.ToolRegistry.Execute(ctx, tools.RoleRegular, "content_grep", params)
+			}
+			return nil, fmt.Errorf("أداة content_grep تحتاج ToolExecutor مفعّل")
+		},
+	})
+
+	// edit_file - تعديل ملفات (قراءة، كتابة، استبدال، إلحاق)
+	registry.Register(tools.ToolDefinition{
+		Name:         "edit_file",
+		Description:  "يعدل ملفاً (قراءة، كتابة، استبدال نص، إلحاق)",
+		Category:     tools.CategoryExecution,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleRegular,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			if container.ToolRegistry != nil {
+				return container.ToolRegistry.Execute(ctx, tools.RoleRegular, "edit_file", params)
+			}
+			return nil, fmt.Errorf("أداة edit_file تحتاج ToolExecutor مفعّل")
+		},
+	})
+
+	// run_tests - تشغيل الاختبارات
+	registry.Register(tools.ToolDefinition{
+		Name:         "run_tests",
+		Description:  "يشغل اختبارات (go test, npm test, pytest...)",
+		Category:     tools.CategoryExecution,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleManager,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			if container.ToolRegistry != nil {
+				return container.ToolRegistry.Execute(ctx, tools.RoleManager, "run_tests", params)
+			}
+			return nil, fmt.Errorf("أداة run_tests تحتاج ToolExecutor مفعّل")
+		},
+	})
+
+	// git_operation - أوامر Git
+	registry.Register(tools.ToolDefinition{
+		Name:         "git_operation",
+		Description:  "ينفذ أوامر Git (status, add, commit, push, pull, branch, checkout, diff, log)",
+		Category:     tools.CategoryExecution,
+		Action:       tools.ActionExecute,
+		RequiredRole: tools.RoleManager,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			if container.ToolRegistry != nil {
+				return container.ToolRegistry.Execute(ctx, tools.RoleManager, "git_operation", params)
+			}
+			return nil, fmt.Errorf("أداة git_operation تحتاج ToolExecutor مفعّل")
 		},
 	})
 

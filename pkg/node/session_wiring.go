@@ -293,6 +293,40 @@ func WireSessionComponents(ctx context.Context, cfg *SessionWiringConfig) (*Sess
 		}
 	}
 
+	// ============================================================
+	// 7. ربط ChatConnector — ربط القنوات والشات بالجلسة
+	// ============================================================
+	if cfg.ChatConnector != nil {
+		// إنشاء قناة الجلسة في ChatConnector
+		channelID, err := cfg.ChatConnector.CreateSessionChannel(sessionID)
+		if err != nil {
+			log.WithError(err).Warn("فشل إنشاء قناة جلسة في ChatConnector")
+		} else {
+			log.WithField("channel_id", channelID).Info("تم إنشاء قناة جلسة في ChatConnector")
+		}
+
+		// ربط رسائل الشات الجديدة بـ ChatConnector
+		if sc.ChatManager != nil {
+			sc.EventBus.Subscribe("chat.message_added", func(evt eventbus.Event) {
+				payloadJSON, err := json.Marshal(evt.Payload)
+				if err != nil {
+					return
+				}
+				var msg session.ChatMessage
+				if err := json.Unmarshal(payloadJSON, &msg); err != nil {
+					return
+				}
+				var prompt string
+			if md, ok := msg.Metadata.(map[string]interface{}); ok {
+				if p, ok := md["prompt"].(string); ok {
+					prompt = p
+				}
+			}
+			_ = cfg.ChatConnector.SendToSessionChannel(sessionID, msg.Source, msg.Content, prompt)
+			})
+		}
+	}
+
 	log.WithField("session_id", sessionID).Info("✅ تم ربط جميع مكونات الجلسة")
 	return bridge, seshBridge, a2aBridge, nil
 }

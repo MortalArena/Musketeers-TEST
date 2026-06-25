@@ -512,6 +512,17 @@ func (s *SessionContainer) AddTask(taskID, title, assignedTo, priority string) e
 	return nil
 }
 
+// VerifyOwner يتحقق من أن المتصل هو مالك الجلسة
+func (s *SessionContainer) VerifyOwner(callerDID string) error {
+	if callerDID == "" {
+		return fmt.Errorf("caller DID cannot be empty")
+	}
+	if callerDID != s.OwnerDID {
+		return fmt.Errorf("caller %s is not the session owner %s", callerDID, s.OwnerDID)
+	}
+	return nil
+}
+
 // [WHY] AddAgent يضيف وكيل جديد
 // [HOW] يضيف الوكيل للحالة الموحدة وينشر حدث session.state.changed
 // [SAFETY] يفك القفل قبل استدعاء eventBus.Publish لمنع Deadlock

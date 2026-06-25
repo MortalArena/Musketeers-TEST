@@ -78,6 +78,24 @@ func (cas *CollectiveAgentSystem) SetRouter(router *providers.Router) {
 	cas.logger.Info("Router set in CollectiveAgentSystem")
 }
 
+// SetSessionContainer يضبط SessionContainer الحقيقي لاستخدام ذاكرة ومهارات الجلسة الحقيقية
+func (cas *CollectiveAgentSystem) SetSessionContainer(sc *session.SessionContainer) {
+	cas.mu.Lock()
+	defer cas.mu.Unlock()
+
+	if sc == nil {
+		return
+	}
+	if sc.Memory != nil {
+		cas.sessionMemory = sc.Memory
+		cas.logger.Info("ربط CollectiveAgentSystem بـ CollectiveMemory من الجلسة الحقيقية")
+	}
+	if sc.Skills != nil {
+		cas.sessionSkills = sc.Skills
+		cas.logger.Info("ربط CollectiveAgentSystem بـ SkillsManager من الجلسة الحقيقية")
+	}
+}
+
 // RegisterAgent يسجل وكيل جديد في النظام الجماعي
 func (cas *CollectiveAgentSystem) RegisterAgent(ctx context.Context, did, agentType, llmType string, specializations []string) error {
 	cas.mu.Lock()

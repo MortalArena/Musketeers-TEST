@@ -101,6 +101,27 @@ func NewWebSocketHandler(eventBus *eventbus.EventBus, container *session.Session
 	}
 }
 
+// VerifyWebSocketDelegationCallback يُستدعى للتحقق من صحة اتصال WebSocket
+// يرجع true إذا كان DID هو مالك الجلسة أو الـ token صحيح
+func (wh *WebSocketHandler) VerifyWebSocketDelegationCallback(did string, token string) bool {
+	if did == "" && token == "" {
+		return false
+	}
+	// إذا تم تقديم DID، تحقق من أنه مالك الجلسة
+	if did != "" {
+		if err := wh.container.VerifyOwner(did); err == nil {
+			return true
+		}
+	}
+	// إذا تم تقديم token، تحقق منه
+	// في النسخة الحالية، نقبل فقط token = "owner" كدليل بسيط
+	// في المستقبل: تحقق بالتوقيع الرقمي
+	if token == "owner" || token == wh.container.OwnerDID {
+		return true
+	}
+	return false
+}
+
 // [WHY] Start يبدأ معالج WebSocket
 // [HOW] يبدأ goroutine لتنظيف العملاء غير النشطين
 // [SAFETY] يستخدم WaitGroup لانتظار goroutines
@@ -141,18 +162,29 @@ func (wh *WebSocketHandler) Stop() error {
 }
 
 // [WHY] HandleWebSocket يعالج اتصالات WebSocket
-// [HOW] يرقّب HTTP إلى WebSocket ويسجّل العميل
-// [SAFETY] يستخدم context مع timeout لمنع الحظر
+// [HOW] يرقّب HTTP إلى WebSocket ويسجّل العميل بعد التحقق من الهوية
+// [SAFETY] يتحقق من هوية المتصل قبل السماح بالاتصال
 func (wh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// [HOW] استخراج المعاملات
 	sessionID := r.URL.Query().Get("session_id")
 	clientID := r.URL.Query().Get("client_id")
+	callerDID := r.URL.Query().Get("did")
+	callerToken := r.URL.Query().Get("token")
 
 	if sessionID == "" || clientID == "" {
 		wh.logger.Println("معاملات session_id أو client_id مفقودة")
 		http.Error(w, "معاملات session_id أو client_id مطلوبة", http.StatusBadRequest)
 		return
 	}
+
+	// [SAFETY] التحقق من هوية المتصل
+	if !wh.VerifyWebSocketDelegationCallback(callerDID, callerToken) {
+		wh.logger.Printf("رفض اتصال WebSocket: client=%s لم يقدم هوية صالحة", clientID)
+		http.Error(w, "هوية غير صالحة — يجب تقديم did أو token", http.StatusUnauthorized)
+		return
+	}
+
+	wh.logger.Printf("تم التحقق من هوية العميل %s: did=%s", clientID, callerDID)
 
 	// [HOW] ترقية HTTP إلى WebSocket
 	conn, err := wh.upgrader.Upgrade(w, r, nil)

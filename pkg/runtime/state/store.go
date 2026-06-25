@@ -1,6 +1,10 @@
 package state
 
-import "github.com/dgraph-io/badger/v4"
+import (
+	"sync"
+
+	"github.com/dgraph-io/badger/v4"
+)
 
 type StateStore interface {
 	Get(key string) ([]byte, error)
@@ -11,6 +15,7 @@ type StateStore interface {
 }
 
 type MemoryStateStore struct {
+	mu   sync.RWMutex
 	data map[string][]byte
 }
 
@@ -19,6 +24,8 @@ func NewMemoryStateStore() *MemoryStateStore {
 }
 
 func (s *MemoryStateStore) Get(key string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	val, exists := s.data[key]
 	if !exists {
 		return nil, nil
@@ -27,16 +34,22 @@ func (s *MemoryStateStore) Get(key string) ([]byte, error) {
 }
 
 func (s *MemoryStateStore) Set(key string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.data[key] = append([]byte(nil), value...)
 	return nil
 }
 
 func (s *MemoryStateStore) Delete(key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	delete(s.data, key)
 	return nil
 }
 
 func (s *MemoryStateStore) List(prefix string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	keys := make([]string, 0)
 	for k := range s.data {
 		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {

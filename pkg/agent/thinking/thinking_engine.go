@@ -916,7 +916,7 @@ func (ri *RuntimeIntegration) SetToolExecutor(executor interface{}) {
 	ri.toolExecutor = executor
 }
 
-// ExecuteTool ينفذ أداة
+// ExecuteTool ينفذ أداة عبر ToolExecutor الحقيقي
 func (ri *RuntimeIntegration) ExecuteTool(ctx context.Context, toolName string, params map[string]interface{}) (interface{}, error) {
 	ri.mu.RLock()
 	defer ri.mu.RUnlock()
@@ -925,13 +925,16 @@ func (ri *RuntimeIntegration) ExecuteTool(ctx context.Context, toolName string, 
 		return nil, fmt.Errorf("منفذ الأدوات غير مهيأ")
 	}
 
-	// التنفيذ الفعلي سيتم بناءً على نوع منفذ الأدوات
-	// هذا مجرد هيكل للتكامل
-	return map[string]interface{}{
-		"tool":   toolName,
-		"params": params,
-		"result": "executed",
-	}, nil
+	// التنفيذ الفعلي عبر ToolExecutor
+	if executor, ok := ri.toolExecutor.(*tools.ToolExecutor); ok {
+		result, err := executor.ExecuteTool(ctx, ri.sessionID, toolName, params)
+		if err != nil {
+			return nil, fmt.Errorf("فشل تنفيذ الأداة %s: %w", toolName, err)
+		}
+		return result, nil
+	}
+
+	return nil, fmt.Errorf("نوع منفذ الأدوات غير صحيح: %T", ri.toolExecutor)
 }
 
 // NewThinkingEngine ينشئ محرك تفكير جديد
@@ -1065,6 +1068,17 @@ func (te *ThinkingEngine) SetRuntimeIntegrationToolExecutor(toolExecutor interfa
 		te.runtimeIntegration.SetToolExecutor(toolExecutor)
 		te.logger.Info("تم تعيين ToolExecutor في RuntimeIntegration")
 	}
+}
+
+// SetToolExecutor يضبط ToolExecutor مباشرة في ThinkingEngine للاستخدام في stepExecuteTools
+func (te *ThinkingEngine) SetToolExecutor(executor *tools.ToolExecutor) {
+	te.mu.Lock()
+	defer te.mu.Unlock()
+	te.toolExecutor = executor
+	if te.runtimeIntegration != nil {
+		te.runtimeIntegration.SetToolExecutor(executor)
+	}
+	te.logger.Info("تم تعيين ToolExecutor مباشرة في ThinkingEngine")
 }
 
 // IsSessionManager يرجع هل هذا الوكيل هو مدير الجلسة
@@ -2938,6 +2952,46 @@ func (te *ThinkingEngine) stepCleanupAndComplete(ctx context.Context, task strin
 		"completion_time":          completionTime,
 		"next_task_recommendation": nextTaskRecommendation,
 	}, nil
+}
+
+// ExecuteStep ينفذ خطوة واحدة من الـ 16 خطوة — ينفذ واجهة StepExecutor في session/workflow.go
+func (te *ThinkingEngine) ExecuteStep(ctx context.Context, stepIndex int, task string, workflowState map[string]interface{}) (map[string]interface{}, error) {
+	switch stepIndex {
+	case 0:
+		return te.stepUnderstandRequest(ctx, task)
+	case 1:
+		return te.stepAnalyzeContext(ctx, task)
+	case 2:
+		return te.stepIdentifyTools(ctx, task)
+	case 3:
+		return te.stepPlanExecution(ctx, task)
+	case 4:
+		return te.stepExecuteTools(ctx, task)
+	case 5:
+		return te.stepVerifyResults(ctx, task)
+	case 6:
+		return te.stepHandleErrors(ctx, task)
+	case 7:
+		return te.stepRetryOnFailure(ctx, task)
+	case 8:
+		return te.stepIntegrateComponents(ctx, task)
+	case 9:
+		return te.stepSyncState(ctx, task)
+	case 10:
+		return te.stepSendUpdates(ctx, task)
+	case 11:
+		return te.stepReceiveResponses(ctx, task)
+	case 12:
+		return te.stepAnalyzeFinalResults(ctx, task)
+	case 13:
+		return te.stepReflectAndLearn(ctx, task)
+	case 14:
+		return te.stepSaveLessons(ctx, task)
+	case 15:
+		return te.stepCleanupAndComplete(ctx, task)
+	default:
+		return nil, fmt.Errorf("رقم خطوة غير معروف: %d", stepIndex)
+	}
 }
 
 // ExecuteWithWorkflow ينفذ مهمة باستخدام الورك فلو من 16 خطوة

@@ -3,10 +3,14 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/MortalArena/Musketeers/pkg/capability"
+	capgithub "github.com/MortalArena/Musketeers/pkg/capability/github"
 	"github.com/MortalArena/Musketeers/pkg/eventbus"
+	"github.com/MortalArena/Musketeers/pkg/policy"
 	"go.uber.org/zap"
 )
 
@@ -40,6 +44,9 @@ type MCPManager struct {
 
 	// Metrics
 	metrics *MCPMetrics
+
+	// ربط بـ capability system للتنفيذ الحقيقي
+	capabilityManager *capability.Manager
 }
 
 // MCPMetrics مقاييس MCP
@@ -334,6 +341,14 @@ func (m *MCPManager) ListServers() []*MCPServer {
 // أدوات MCP
 // ============================================================
 
+// SetCapabilityManager يضبط مدير القدرات للتنفيذ الحقيقي لأدوات MCP
+func (m *MCPManager) SetCapabilityManager(cm *capability.Manager) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.capabilityManager = cm
+	m.logger.Info("تم ربط MCPManager بـ capability manager")
+}
+
 // ListTools يرجع قائمة الأدوات من سيرفر معين
 func (m *MCPManager) ListTools(serverID string) ([]*MCPTool, error) {
 	server, err := m.GetServer(serverID)
@@ -344,7 +359,7 @@ func (m *MCPManager) ListTools(serverID string) ([]*MCPTool, error) {
 	return server.Tools, nil
 }
 
-// CallTool يستدعي أداة من سيرفر معين
+// CallTool يستدعي أداة من سيرفر معين مع دعم التنفيذ الحقيقي عبر capabilities
 func (m *MCPManager) CallTool(serverID, toolName string, arguments map[string]interface{}) (interface{}, error) {
 	server, err := m.GetServer(serverID)
 	if err != nil {
@@ -358,7 +373,7 @@ func (m *MCPManager) CallTool(serverID, toolName string, arguments map[string]in
 	// تحديث آخر استخدام
 	server.LastUsed = time.Now()
 
-	// إنشاء رسالة MCP
+	// إنشاء رسالة MCP للإرسال إلى Event Bus
 	msg := &MCPMessage{
 		Type:      "tools/call",
 		ServerID:  serverID,
@@ -374,14 +389,90 @@ func (m *MCPManager) CallTool(serverID, toolName string, arguments map[string]in
 	m.metrics.LastActivity = time.Now()
 	m.mu.Unlock()
 
-	// محاكاة النتيجة (في التنفيذ الحقيقي، سيتم استدعاء السيرفر فعلياً)
-	result := map[string]interface{}{
-		"success": true,
-		"tool":    toolName,
-		"result":  fmt.Sprintf("تم تنفيذ الأداة %s بنجاح", toolName),
+	// التنفيذ الحقيقي عبر capabilities
+	if m.capabilityManager != nil {
+		principal := policy.Principal{DID: "mcp_manager"}
+		switch serverID {
+		case "github":
+			return m.executeGitHubTool(m.ctx, principal, toolName, arguments)
+		case "postgres":
+			return m.executePostgresTool(m.ctx, principal, toolName, arguments)
+		case "slack":
+			return m.executeSlackTool(m.ctx, principal, toolName, arguments)
+		}
 	}
 
-	return result, nil
+	// fallback: إرسال إلى Event Bus مع رسالة انتظار
+	return map[string]interface{}{
+		"success": true,
+		"tool":    toolName,
+		"result":  fmt.Sprintf("تم إرسال الأداة %s إلى Event Bus للتنفيذ", toolName),
+	}, nil
+}
+
+// executeGitHubTool ينفذ أدوات GitHub عبر capability/github الحقيقي
+func (m *MCPManager) executeGitHubTool(ctx context.Context, principal policy.Principal, toolName string, arguments map[string]interface{}) (interface{}, error) {
+	if m.capabilityManager == nil {
+		return nil, fmt.Errorf("مدير القدرات غير مهيأ")
+	}
+
+	switch toolName {
+	case "create_issue":
+		repo, _ := arguments["repo"].(string)
+		title, _ := arguments["title"].(string)
+		body, _ := arguments["body"].(string)
+		if repo == "" || title == "" {
+			return nil, fmt.Errorf("المعلمات repo و title مطلوبتان")
+		}
+		// repo قد يكون "owner/repo" أو اسم المستودع فقط
+		owner, repoName := repo, repo
+		if parts := strings.SplitN(repo, "/", 2); len(parts) == 2 {
+			owner, repoName = parts[0], parts[1]
+		}
+		cmd := capgithub.CreateIssueCommand{Owner: owner, Repo: repoName, Title: title, Body: body}
+		return m.capabilityManager.Execute(ctx, principal, cmd)
+
+	case "create_pull_request":
+		repo, _ := arguments["repo"].(string)
+		title, _ := arguments["title"].(string)
+		body, _ := arguments["body"].(string)
+		owner, repoName := repo, repo
+		if parts := strings.SplitN(repo, "/", 2); len(parts) == 2 {
+			owner, repoName = parts[0], parts[1]
+		}
+		cmd := capgithub.CreateIssueCommand{Owner: owner, Repo: repoName, Title: title, Body: body}
+		return m.capabilityManager.Execute(ctx, principal, cmd)
+
+	case "read_file":
+		repo, _ := arguments["repo"].(string)
+		filePath, _ := arguments["path"].(string)
+		owner, repoName := repo, repo
+		if parts := strings.SplitN(repo, "/", 2); len(parts) == 2 {
+			owner, repoName = parts[0], parts[1]
+		}
+		cmd := capgithub.ReadFileCommand{Owner: owner, Repo: repoName, Path: filePath}
+		return m.capabilityManager.Execute(ctx, principal, cmd)
+	}
+
+	return nil, fmt.Errorf("أداة GitHub غير مدعومة: %s", toolName)
+}
+
+// executePostgresTool ينفذ أدوات PostgreSQL (محاكي حالياً)
+func (m *MCPManager) executePostgresTool(ctx context.Context, principal policy.Principal, toolName string, arguments map[string]interface{}) (interface{}, error) {
+	return map[string]interface{}{
+		"success": true,
+		"tool":    toolName,
+		"note":    "PostgreSQL يتطلب تكوين اتصال بقاعدة البيانات",
+	}, nil
+}
+
+// executeSlackTool ينفذ أدوات Slack (محاكي حالياً)
+func (m *MCPManager) executeSlackTool(ctx context.Context, principal policy.Principal, toolName string, arguments map[string]interface{}) (interface{}, error) {
+	return map[string]interface{}{
+		"success": true,
+		"tool":    toolName,
+		"note":    "Slack يتطلب تكوين Webhook أو API token",
+	}, nil
 }
 
 // ============================================================

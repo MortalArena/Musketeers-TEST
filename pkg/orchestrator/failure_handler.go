@@ -94,9 +94,36 @@ func (fh *FailureHandler) HandleFailure(event FailureEvent) FailureStrategy {
 		zap.Int("retry_count", event.RetryCount),
 	)
 
+	// نشر حدث الفشل عبر EventBus
+	if fh.EventBus != nil {
+		fh.EventBus.Publish(eventbus.Event{
+			Type:      "failure.detected",
+			Payload:   event,
+			SessionID: event.TaskID,
+		})
+	}
+
 	strategy, exists := fh.Strategies[event.FailureType]
 	if !exists {
 		strategy = StrategyRetry
+	}
+
+	// تقييم قواعد التصعيد
+	for _, rule := range fh.EscalationRules {
+		if evaluateRule(rule, event) {
+			fh.Logger.Warn("تفعيل قاعدة تصعيد",
+				zap.String("rule_condition", rule.Condition),
+				zap.String("action", rule.Action),
+			)
+			if fh.EventBus != nil {
+				fh.EventBus.Publish(eventbus.Event{
+					Type:      "failure.escalated",
+					Payload:   map[string]interface{}{"rule": rule, "event": event},
+					SessionID: event.TaskID,
+				})
+			}
+			return StrategyEscalate
+		}
 	}
 
 	maxRetries := fh.RetryLimits["default"]
@@ -105,6 +132,20 @@ func (fh *FailureHandler) HandleFailure(event FailureEvent) FailureStrategy {
 	}
 
 	return strategy
+}
+
+// evaluateRule يقيّم قاعدة تصعيد
+func evaluateRule(rule EscalationRule, event FailureEvent) bool {
+	switch rule.Condition {
+	case "retry_count >= 3":
+		return event.RetryCount >= 3
+	case "all_agents_busy":
+		return false
+	case "agent_capability_too_low":
+		return false
+	default:
+		return false
+	}
 }
 
 // SetStrategy يضبط استراتيجية لنوع فشل معين

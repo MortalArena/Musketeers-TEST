@@ -7,6 +7,10 @@ import (
 
 	"github.com/MortalArena/Musketeers/pkg/agent"
 	"github.com/MortalArena/Musketeers/pkg/agent/unified"
+	"github.com/MortalArena/Musketeers/pkg/capability"
+	capgithub "github.com/MortalArena/Musketeers/pkg/capability/github"
+	"github.com/MortalArena/Musketeers/pkg/eventbus"
+	"github.com/MortalArena/Musketeers/pkg/policy"
 	"github.com/MortalArena/Musketeers/pkg/verification"
 	"go.uber.org/zap"
 )
@@ -86,6 +90,11 @@ type OrchestratorEngine struct {
 	roleAssigner      *RoleAssigner
 	verifier          *verification.MultiStageVerifier
 	capabilityMatcher *CapabilityMatcher
+	mcpManager        *MCPManager
+	connector         *Connector
+	capabilityManager *capability.Manager
+	eventBus          *eventbus.EventBus
+	policyEngine      *policy.Engine
 	unifiedAgent      *unified.UnifiedAgent // مرجع للتكامل مع UnifiedAgent
 	logger            *zap.Logger
 	mu                sync.RWMutex
@@ -94,13 +103,31 @@ type OrchestratorEngine struct {
 
 // NewOrchestratorEngine ينشئ محرك تنسيق جديد
 func NewOrchestratorEngine(registry *agent.AgentRegistry) *OrchestratorEngine {
+	// إنشاء EventBus
+	evBus := eventbus.NewEventBus()
+
+	// إنشاء مدير القدرات مع القدرات الحقيقية
+	polEng := policy.NewEngine()
+	capMgr := capability.NewManager(polEng)
+	githubCap := capgithub.NewGitHubCapability("")
+	capMgr.Register(githubCap)
+
+	// إنشاء MCPManager مع EventBus وربطه بـ CapabilityManager
+	logger := zap.NewNop()
+	mcpMgr := NewMCPManager(evBus, logger)
+	mcpMgr.SetCapabilityManager(capMgr)
+
 	return &OrchestratorEngine{
 		registry:          registry,
 		lifecycleManager:  NewAgentLifecycleManager(registry),
 		roleAssigner:      NewRoleAssigner(registry),
 		verifier:          verification.NewMultiStageVerifier(),
 		capabilityMatcher: NewCapabilityMatcher(),
-		logger:            zap.NewNop(),
+		mcpManager:        mcpMgr,
+		capabilityManager: capMgr,
+		eventBus:          evBus,
+		policyEngine:      polEng,
+		logger:            logger,
 		running:           false,
 	}
 }
@@ -121,6 +148,21 @@ func (oe *OrchestratorEngine) SetUnifiedAgent(ua *unified.UnifiedAgent) {
 	defer oe.mu.Unlock()
 	oe.unifiedAgent = ua
 	oe.logger.Info("تم ضبط UnifiedAgent في OrchestratorEngine")
+}
+
+// SetConnector يضبط Connector System في OrchestratorEngine
+func (oe *OrchestratorEngine) SetConnector(c *Connector) {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+	oe.connector = c
+	oe.logger.Info("تم ضبط Connector في OrchestratorEngine")
+}
+
+// GetConnector يرجع Connector System
+func (oe *OrchestratorEngine) GetConnector() *Connector {
+	oe.mu.RLock()
+	defer oe.mu.RUnlock()
+	return oe.connector
 }
 
 // GetUnifiedAgent يرجع مرجع UnifiedAgent

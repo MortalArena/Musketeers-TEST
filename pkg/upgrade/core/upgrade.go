@@ -1,7 +1,13 @@
 package core
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -315,26 +321,114 @@ func (um *UpgradeManager) determineUpgradeType(version *Version) UpgradeType {
 
 // performUpgrade ينفذ عملية الترقية
 func (um *UpgradeManager) performUpgrade(upgrade *Upgrade, version *Version) {
+	downloadURL := upgrade.DownloadURL
+	if downloadURL == "" {
+		if url, ok := version.Metadata["download_url"].(string); ok {
+			downloadURL = url
+		} else if url, ok := version.Metadata["url"].(string); ok {
+			downloadURL = url
+		}
+	}
+
+	if downloadURL == "" {
+		um.failUpgrade(upgrade, "no download URL available")
+		return
+	}
+
 	um.mu.Lock()
 	upgrade.Status = UpgradeStatusDownloading
 	um.mu.Unlock()
 
-	// محاكاة عملية التحميل
-	time.Sleep(2 * time.Second)
+	downloadPath := upgrade.DownloadPath
+	if downloadPath == "" {
+		ext := filepath.Ext(downloadURL)
+		if ext == "" {
+			ext = ".bin"
+		}
+		downloadPath = filepath.Join(os.TempDir(), fmt.Sprintf("upgrade_%s%s", version.ID, ext))
+	}
+
+	if err := os.MkdirAll(filepath.Dir(downloadPath), 0755); err != nil {
+		um.failUpgrade(upgrade, fmt.Sprintf("failed to create download directory: %v", err))
+		return
+	}
+
+	tmpFile, err := os.CreateTemp(filepath.Dir(downloadPath), "upgrade-tmp-*")
+	if err != nil {
+		um.failUpgrade(upgrade, fmt.Sprintf("failed to create temp file: %v", err))
+		return
+	}
+	tmpPath := tmpFile.Name()
+
+	resp, err := http.Get(downloadURL)
+	if err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		um.failUpgrade(upgrade, fmt.Sprintf("failed to download: %v", err))
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		um.failUpgrade(upgrade, fmt.Sprintf("download returned status: %s", resp.Status))
+		return
+	}
+
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmpFile, hash), resp.Body)
+	resp.Body.Close()
+	tmpFile.Close()
+
+	if err != nil {
+		os.Remove(tmpPath)
+		um.failUpgrade(upgrade, fmt.Sprintf("failed to write download: %v", err))
+		return
+	}
+
+	expectedChecksum := upgrade.Checksum
+	if expectedChecksum == "" {
+		expectedChecksum = version.Checksum
+	}
+	if expectedChecksum != "" {
+		computed := hex.EncodeToString(hash.Sum(nil))
+		if computed != expectedChecksum {
+			os.Remove(tmpPath)
+			um.failUpgrade(upgrade, fmt.Sprintf("checksum mismatch: expected %s, got %s", expectedChecksum, computed))
+			return
+		}
+		um.logger.Info("checksum verified",
+			zap.String("upgrade_id", upgrade.ID))
+	}
+
+	if err := os.Rename(tmpPath, downloadPath); err != nil {
+		if err := copyFile(tmpPath, downloadPath); err != nil {
+			os.Remove(tmpPath)
+			um.failUpgrade(upgrade, fmt.Sprintf("failed to move downloaded file: %v", err))
+			return
+		}
+	}
+	os.Remove(tmpPath)
 
 	um.mu.Lock()
 	upgrade.Status = UpgradeStatusDownloaded
+	upgrade.DownloadPath = downloadPath
+	upgrade.Size = written
 	upgrade.Progress = 50
 	um.mu.Unlock()
 
 	um.logger.Info("تم تحميل الترقية",
-		zap.String("upgrade_id", upgrade.ID))
+		zap.String("upgrade_id", upgrade.ID),
+		zap.String("download_path", downloadPath),
+		zap.Int64("size", written))
 
 	// نشر حدث التحميل
 	if um.eventBus != nil {
 		um.eventBus.Publish("upgrade.downloaded", map[string]interface{}{
 			"upgrade_id": upgrade.ID,
 			"version_id": version.ID,
+			"size":       written,
 		})
 	}
 
@@ -342,8 +436,10 @@ func (um *UpgradeManager) performUpgrade(upgrade *Upgrade, version *Version) {
 	upgrade.Status = UpgradeStatusInstalling
 	um.mu.Unlock()
 
-	// محاكاة عملية التثبيت
-	time.Sleep(3 * time.Second)
+	if _, err := os.Stat(downloadPath); err != nil {
+		um.failUpgrade(upgrade, fmt.Sprintf("downloaded file not found: %v", err))
+		return
+	}
 
 	um.mu.Lock()
 	upgrade.Status = UpgradeStatusCompleted
@@ -351,8 +447,10 @@ func (um *UpgradeManager) performUpgrade(upgrade *Upgrade, version *Version) {
 	upgrade.CompletedAt = time.Now()
 	um.mu.Unlock()
 
-	// تعيين الإصدار الجديد كحالي
-	um.SetCurrentVersion(version.ID)
+	if err := um.SetCurrentVersion(version.ID); err != nil {
+		um.failUpgrade(upgrade, fmt.Sprintf("failed to set current version: %v", err))
+		return
+	}
 
 	um.logger.Info("تم إكمال الترقية",
 		zap.String("upgrade_id", upgrade.ID),
@@ -374,6 +472,52 @@ func (um *UpgradeManager) performUpgrade(upgrade *Upgrade, version *Version) {
 			"version_id": version.ID,
 		})
 	}
+}
+
+// failUpgrade يضبط حالة الترقية على فاشلة مع رسالة خطأ
+func (um *UpgradeManager) failUpgrade(upgrade *Upgrade, errMsg string) {
+	um.mu.Lock()
+	defer um.mu.Unlock()
+	upgrade.Status = UpgradeStatusFailed
+	upgrade.ErrorMessage = errMsg
+	upgrade.CompletedAt = time.Now()
+
+	um.logger.Error("فشلت الترقية",
+		zap.String("upgrade_id", upgrade.ID),
+		zap.String("error", errMsg))
+
+	if um.eventBus != nil {
+		um.eventBus.Publish("upgrade.failed", map[string]interface{}{
+			"upgrade_id": upgrade.ID,
+			"error":      errMsg,
+		})
+	}
+
+	if um.storage != nil {
+		if err := um.storage.StoreUpgrade(upgrade); err != nil {
+			um.logger.Error("فشل تخزين حالة الترقية الفاشلة",
+				zap.String("upgrade_id", upgrade.ID),
+				zap.Error(err))
+		}
+	}
+}
+
+// copyFile ينسخ ملف من src إلى dst
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
 }
 
 // RollbackUpgrade يتراجع عن الترقية

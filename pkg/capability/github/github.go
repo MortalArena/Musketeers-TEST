@@ -32,6 +32,8 @@ func (c *GitHubCapability) Execute(ctx context.Context, principal policy.Princip
 		return c.listRepos(ctx, v)
 	case CreateIssueCommand:
 		return c.createIssue(ctx, v)
+	case ReadFileCommand:
+		return c.readFile(ctx, v)
 	case GetPRCommand:
 		return c.getPR(ctx, v)
 	case CreateCommentCommand:
@@ -74,6 +76,17 @@ func (c GetPRCommand) Args() map[string]any {
 	return map[string]any{"owner": c.Owner, "repo": c.Repo, "pull_number": c.PullNumber}
 }
 
+type ReadFileCommand struct {
+	Owner string `json:"owner"`
+	Repo  string `json:"repo"`
+	Path  string `json:"path"`
+}
+
+func (ReadFileCommand) Name() string { return "github.read_file" }
+func (c ReadFileCommand) Args() map[string]any {
+	return map[string]any{"owner": c.Owner, "repo": c.Repo, "path": c.Path}
+}
+
 type CreateCommentCommand struct {
 	Owner   string `json:"owner"`
 	Repo    string `json:"repo"`
@@ -111,6 +124,18 @@ func (c *GitHubCapability) createIssue(ctx context.Context, cmd CreateIssueComma
 		return nil, err
 	}
 	return capability.NewResult(cmd.Name(), map[string]any{"issue": issue}), nil
+}
+
+func (c *GitHubCapability) readFile(ctx context.Context, cmd ReadFileCommand) (*capability.Result, error) {
+	if cmd.Owner == "" || cmd.Repo == "" || cmd.Path == "" {
+		return nil, fmt.Errorf("owner, repo and path are required")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/contents/%s", cmd.Owner, cmd.Repo, cmd.Path)
+	var content map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &content); err != nil {
+		return nil, err
+	}
+	return capability.NewResult(cmd.Name(), map[string]any{"content": content}), nil
 }
 
 func (c *GitHubCapability) getPR(ctx context.Context, cmd GetPRCommand) (*capability.Result, error) {

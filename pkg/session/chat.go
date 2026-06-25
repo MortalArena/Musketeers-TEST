@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/eventbus"
+	"github.com/google/uuid"
 )
 
 // [WHY] MsgType أنواع الرسائل في المحادثة
@@ -258,11 +259,10 @@ func (cm *ChatManager) GetSessionID() string {
 }
 
 // [WHY] generateMessageID يولد معرف فريد للرسالة
-// [HOW] يستخدم الوقت وUUID
+// [HOW] يستخدم UUID الحقيقي
 // [SAFETY] يضمن التفرد
 func generateMessageID() string {
-	// [TODO] استخدام UUID حقيقي
-	return time.Now().Format("20060102150405.000000")
+	return uuid.New().String()
 }
 
 // [WHY] AddMessageWithAttachment يضيف رسالة مع ملف مرفق
