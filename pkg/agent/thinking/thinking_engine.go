@@ -559,6 +559,8 @@ type CollectiveLearningEngine struct {
 	sharedLessons  map[string]*SharedLesson
 	sharedPatterns map[string]*Pattern
 	mu             sync.RWMutex
+	lessonsMu      sync.RWMutex // [FIX] mutex منفصل لـ sharedLessons
+	patternsMu     sync.RWMutex // [FIX] mutex منفصل لـ sharedPatterns
 }
 
 // VectorStore متجه للتعلم الجماعي
@@ -567,6 +569,8 @@ type VectorStore struct {
 	metadata     map[string]interface{}
 	embeddingGen *EmbeddingGenerator
 	mu           sync.RWMutex
+	vectorsMu    sync.RWMutex // [FIX] mutex منفصل لـ vectors
+	metadataMu   sync.RWMutex // [FIX] mutex منفصل لـ metadata
 }
 
 // SharedLesson درس مشترك
