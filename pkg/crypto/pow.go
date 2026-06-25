@@ -199,6 +199,11 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 
 // checkDifficulty checks the difficulty
 func checkDifficulty(hash []byte, difficulty int) bool {
+	// [SAFETY] Validate hash length
+	if len(hash) < KeyLen {
+		return false
+	}
+
 	requiredZeros := difficulty / 8
 	requiredBits := difficulty % 8
 

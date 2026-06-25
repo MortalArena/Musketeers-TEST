@@ -155,7 +155,12 @@ func (c *CRLCache) saveToDisk() error {
 		return err
 	}
 
-	return os.WriteFile(c.diskPath, data, 0600)
+	// [SAFETY] Use atomic write to prevent corruption
+	tmpPath := c.diskPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, c.diskPath)
 }
 
 // [SAFETY] loadFromDisk يحمّل CRL من القرص

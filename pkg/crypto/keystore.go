@@ -42,6 +42,11 @@ type keystorePlaintext struct {
 
 // SaveKeystore saves private key encrypted to disk
 func SaveKeystore(path, passphrase string, kp *KeyPair, mnemonic string) error {
+	// [SAFETY] Validate passphrase strength
+	if len(passphrase) < 8 {
+		return fmt.Errorf("passphrase must be at least 8 characters")
+	}
+
 	plain := keystorePlaintext{
 		PrivateKey: hex.EncodeToString(kp.Private),
 		Mnemonic:   mnemonic,

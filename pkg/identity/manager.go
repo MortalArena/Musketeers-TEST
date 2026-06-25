@@ -40,6 +40,14 @@ func NewIdentityManager(storageDir string) (*IdentityManager, error) {
 // - API key changes (via hash matching)
 // - Agent updates (via version tracking)
 func (im *IdentityManager) CreateOrUpdateIdentity(did, nodeID, identityType, agentName, agentVersion, provider, apiKey string) (*PersistentIdentity, error) {
+	// [SAFETY] Input validation
+	if did == "" {
+		return nil, fmt.Errorf("DID cannot be empty")
+	}
+	if nodeID == "" {
+		return nil, fmt.Errorf("nodeID cannot be empty")
+	}
+
 	im.mu.Lock()
 	defer im.mu.Unlock()
 

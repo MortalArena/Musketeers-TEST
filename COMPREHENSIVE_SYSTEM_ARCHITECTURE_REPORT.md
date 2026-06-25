@@ -1975,6 +1975,9 @@ func (hcm *HumanCapabilityManager) applyCapabilities(
 - pkg/cache/ و pkg/metrics/
 - pkg/session/ و pkg/eventbus/
 - pkg/node/ (pkg/p2p غير موجود)
+- pkg/network/ (الاتصال والشبكة)
+- pkg/crypto/ (التشفير)
+- pkg/identity/ (إثبات الهوية)
 
 ### الثغرات الحرجة المكتشفة والمصححة
 
@@ -2128,6 +2131,74 @@ if agentDID, ok := value.(string); ok {
 }
 ```
 
+#### 11. Stop() Panic Risk في BootstrapManager (HIGH)
+**الملف**: `pkg/network/bootstrap.go`
+**المشكلة**: Stop() قد يسبب panic إذا تم استدعاؤه مرتين
+**الخطر**: System crash، goroutine leaks
+**الإصلاح**: إضافة mutex protection و safe channel closing
+```go
+func (bm *BootstrapManager) Stop() {
+    bm.mu.Lock()
+    defer bm.mu.Unlock()
+    
+    select {
+    case <-bm.stopChan:
+        return
+    default:
+        close(bm.stopChan)
+    }
+}
+```
+
+#### 12. Weak Passphrase Validation (MEDIUM)
+**الملف**: `pkg/crypto/keystore.go`
+**المشكلة**: عدم وجود تحقق من قوة passphrase
+**الخطر**: Brute force attacks، weak encryption
+**الإصلاح**: إضافة minimum length validation
+```go
+if len(passphrase) < 8 {
+    return fmt.Errorf("passphrase must be at least 8 characters")
+}
+```
+
+#### 13. Hash Length Check Missing (MEDIUM)
+**الملف**: `pkg/crypto/pow.go`
+**المشكلة**: checkDifficulty لا يتحقق من طول hash
+**الخطر**: Index out of bounds، incorrect validation
+**الإصلاح**: إضافة hash length validation
+```go
+if len(hash) < KeyLen {
+    return false
+}
+```
+
+#### 14. Race Condition in saveToDisk (HIGH)
+**الملف**: `pkg/identity/revocation.go`
+**المشكلة**: saveToDisk يقرأ من map مع RLock لكن يكتب من goroutines أخرى
+**الخطر**: Data races، file corruption
+**الإصلاح**: استخدام atomic write مع temp file
+```go
+tmpPath := c.diskPath + ".tmp"
+if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+    return err
+}
+return os.Rename(tmpPath, c.diskPath)
+```
+
+#### 15. Input Validation Missing (MEDIUM)
+**الملف**: `pkg/identity/manager.go`
+**المشكلة**: CreateOrUpdateIdentity لا يتحقق من المدخلات
+**الخطر**: Invalid state، data corruption
+**الإصلاح**: إضافة input validation
+```go
+if did == "" {
+    return nil, fmt.Errorf("DID cannot be empty")
+}
+if nodeID == "" {
+    return nil, fmt.Errorf("nodeID cannot be empty")
+}
+```
+
 ### المشاكل المعمارية المكتشفة
 
 #### 1. pkg/p2p غير موجود
@@ -2152,7 +2223,7 @@ if agentDID, ok := value.(string); ok {
 
 ### ملخص الإصلاحات
 
-تم إصلاح **10 ثغرات حرجة** و **5 مشاكل معمارية**:
+تم إصلاح **16 ثغرة حرجة** و **5 مشاكل معمارية**:
 
 **الثغرات الحرجة المصححة:**
 1. ✅ Hash function آمنة في cache
@@ -2166,6 +2237,11 @@ if agentDID, ok := value.(string); ok {
 9. ✅ Import validation في container.go
 10. ✅ Silent error swallowing في journal.go
 11. ✅ Type assertion safety في memory.go
+12. ✅ Stop() panic risk في BootstrapManager
+13. ✅ Weak passphrase validation في keystore
+14. ✅ Hash length check missing في PoW
+15. ✅ Race condition في saveToDisk
+16. ✅ Input validation missing في identity manager
 
 **المشاكل المعمارية المحددة:**
 1. ⚠️ pkg/p2p غير موجود (يحتاج قرار)
@@ -2196,7 +2272,7 @@ if agentDID, ok := value.(string); ok {
 6. **نظام إدارة الصلاحيات للعميل البشري**: أوضاع أوتوماتيكي ويدوي وتعديل ديناميكي
 7. **التسلسل المنطقي للتنفيذ**: 8 أسابيع من التنفيذ المنظم
 8. **خطة التنفيذ الكاملة**: خطة تفصيلية لكل أسبوع ويوم
-9. **تقرير إصلاح الثغرات الحرجة والمشاكل المعمارية**: تحليل شامل وإصلاح 11 ثغرة حرجة و5 مشاكل معمارية
+9. **تقرير إصلاح الثغرات الحرجة والمشاكل المعمارية**: تحليل شامل وإصلاح 16 ثغرة حرجة و5 مشاكل معمارية
 
 النظام النهائي سيكون:
 - نظام تشغيل حقيقي للوكلاء والبشر

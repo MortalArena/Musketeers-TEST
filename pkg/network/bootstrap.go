@@ -71,12 +71,12 @@ type BootstrapManager struct {
 
 // BootstrapConfig إعدادات bootstrap
 type BootstrapConfig struct {
-	Peers              []string
-	MinConnections     int
-	MaxRetries         int
-	RetryDelay         time.Duration
-	PeriodicInterval   time.Duration
-	EnablePeriodic     bool
+	Peers            []string
+	MinConnections   int
+	MaxRetries       int
+	RetryDelay       time.Duration
+	PeriodicInterval time.Duration
+	EnablePeriodic   bool
 }
 
 // DefaultBootstrapConfig الإعدادات الافتراضية
@@ -242,7 +242,16 @@ func (bm *BootstrapManager) checkAndReconnect(ctx context.Context) {
 
 // Stop يوقف bootstrap
 func (bm *BootstrapManager) Stop() {
-	close(bm.stopChan)
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	select {
+	case <-bm.stopChan:
+		// Already closed
+		return
+	default:
+		close(bm.stopChan)
+	}
 }
 
 // GetConnectedPeers يعيد العقد المتصلة
@@ -263,9 +272,9 @@ func (bm *BootstrapManager) Stats() map[string]interface{} {
 	defer bm.mu.RUnlock()
 
 	return map[string]interface{}{
-		"total_peers":      len(bm.peers),
-		"connected_peers":  len(bm.connectedPeers),
-		"network_peers":    len(bm.host.Network().Peers()),
-		"min_connections":  bm.minConnections,
+		"total_peers":     len(bm.peers),
+		"connected_peers": len(bm.connectedPeers),
+		"network_peers":   len(bm.host.Network().Peers()),
+		"min_connections": bm.minConnections,
 	}
 }
