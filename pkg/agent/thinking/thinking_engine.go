@@ -739,6 +739,7 @@ func NewSessionGovernor() *SessionGovernor {
 // ThinkingEngine محرك التفكير - نسخة طبق الأصل من عمليتي الحقيقية
 type ThinkingEngine struct {
 	thoughts            []*Thought
+	thoughtsMu          sync.RWMutex // [FIX] mutex منفصل لـ thoughts لتجنب Data Race
 	currentPhase        ThinkingPhase
 	logger              *zap.Logger
 	mu                  sync.RWMutex
@@ -4095,8 +4096,8 @@ func (te *ThinkingEngine) GetSessionContext(ctx context.Context) (map[string]int
 
 // AddThought يضيف فكرة جديدة
 func (te *ThinkingEngine) AddThought(ctx context.Context, phase ThinkingPhase, content string, metadata map[string]interface{}) error {
-	te.mu.Lock()
-	defer te.mu.Unlock()
+	te.thoughtsMu.Lock()
+	defer te.thoughtsMu.Unlock()
 
 	thought := &Thought{
 		ID:        fmt.Sprintf("thought_%d", time.Now().UnixNano()),
@@ -4120,7 +4121,11 @@ func (te *ThinkingEngine) AddThought(ctx context.Context, phase ThinkingPhase, c
 }
 
 // addThoughtInternal يضيف فكرة بدون قفل (thread-unsafe)
+// [FIX] الآن يستخدم thoughtsMu لضمان الأمان
 func (te *ThinkingEngine) addThoughtInternal(phase ThinkingPhase, content string, metadata map[string]interface{}) error {
+	te.thoughtsMu.Lock()
+	defer te.thoughtsMu.Unlock()
+
 	thought := &Thought{
 		ID:        fmt.Sprintf("thought_%d", time.Now().UnixNano()),
 		Phase:     phase,
@@ -4136,17 +4141,19 @@ func (te *ThinkingEngine) addThoughtInternal(phase ThinkingPhase, content string
 }
 
 // GetThoughts يرجع جميع الأفكار
+// [FIX] يستخدم thoughtsMu لضمان الأمان
 func (te *ThinkingEngine) GetThoughts(ctx context.Context) ([]*Thought, error) {
-	te.mu.RLock()
-	defer te.mu.RUnlock()
+	te.thoughtsMu.RLock()
+	defer te.thoughtsMu.RUnlock()
 
 	return te.thoughts, nil
 }
 
 // GetThoughtsByPhase يرجع الأفكار حسب المرحلة
+// [FIX] يستخدم thoughtsMu لضمان الأمان
 func (te *ThinkingEngine) GetThoughtsByPhase(ctx context.Context, phase ThinkingPhase) ([]*Thought, error) {
-	te.mu.RLock()
-	defer te.mu.RUnlock()
+	te.thoughtsMu.RLock()
+	defer te.thoughtsMu.RUnlock()
 
 	var result []*Thought
 	for _, thought := range te.thoughts {
