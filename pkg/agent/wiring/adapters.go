@@ -23,6 +23,17 @@ func NewThinkingEngineAdapter(engine interface{}, logger *zap.Logger) *ThinkingE
 
 // Connect يربط ThinkingEngine بمكون آخر
 func (a *ThinkingEngineAdapter) Connect(ctx context.Context, target interface{}) error {
+	// [SAFETY] Validate inputs
+	if ctx == nil {
+		return fmt.Errorf("context cannot be nil")
+	}
+	if target == nil {
+		return fmt.Errorf("target cannot be nil")
+	}
+	if a.engine == nil {
+		return fmt.Errorf("engine not initialized")
+	}
+
 	a.logger.Info("ربط ThinkingEngine بمكون آخر",
 		zap.String("target", fmt.Sprintf("%T", target)),
 	)
@@ -32,6 +43,11 @@ func (a *ThinkingEngineAdapter) Connect(ctx context.Context, target interface{})
 
 // Disconnect يفصل ThinkingEngine
 func (a *ThinkingEngineAdapter) Disconnect(ctx context.Context) error {
+	// [SAFETY] Validate context
+	if ctx == nil {
+		return fmt.Errorf("context cannot be nil")
+	}
+
 	a.logger.Info("فصل ThinkingEngine")
 	return nil
 }
@@ -62,6 +78,17 @@ func NewSessionManagerAdapter(manager interface{}, logger *zap.Logger) *SessionM
 
 // Connect يربط SessionManager بمكون آخر
 func (a *SessionManagerAdapter) Connect(ctx context.Context, target interface{}) error {
+	// [SAFETY] Validate inputs
+	if ctx == nil {
+		return fmt.Errorf("context cannot be nil")
+	}
+	if target == nil {
+		return fmt.Errorf("target cannot be nil")
+	}
+	if a.manager == nil {
+		return fmt.Errorf("manager not initialized")
+	}
+
 	a.logger.Info("ربط SessionManager بمكون آخر",
 		zap.String("target", fmt.Sprintf("%T", target)),
 	)
@@ -70,6 +97,11 @@ func (a *SessionManagerAdapter) Connect(ctx context.Context, target interface{})
 
 // Disconnect يفصل SessionManager
 func (a *SessionManagerAdapter) Disconnect(ctx context.Context) error {
+	// [SAFETY] Validate context
+	if ctx == nil {
+		return fmt.Errorf("context cannot be nil")
+	}
+
 	a.logger.Info("فصل SessionManager")
 	return nil
 }

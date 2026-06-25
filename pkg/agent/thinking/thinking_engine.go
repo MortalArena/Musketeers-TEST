@@ -506,12 +506,31 @@ type SessionBridge struct {
 
 // Send يرسل رسالة عبر الجسر
 func (sb *SessionBridge) Send(message BridgeMessage) error {
+	// [SAFETY] Validate message before sending
+	if message.ID == "" {
+		return fmt.Errorf("message ID cannot be empty")
+	}
+	if message.From == "" {
+		return fmt.Errorf("message From cannot be empty")
+	}
+	if message.To == "" {
+		return fmt.Errorf("message To cannot be empty")
+	}
+	if sb.Status != BridgeStatusActive {
+		return fmt.Errorf("bridge is not active, current status: %s", sb.Status)
+	}
+
 	// تنفيذ فعلي لإرسال الرسالة
 	return nil
 }
 
 // Receive يستقبل رسالة من الجسر
 func (sb *SessionBridge) Receive() (*BridgeMessage, error) {
+	// [SAFETY] Check bridge status
+	if sb.Status != BridgeStatusActive {
+		return nil, fmt.Errorf("bridge is not active, current status: %s", sb.Status)
+	}
+
 	// تنفيذ فعلي لاستقبال الرسالة
 	return &BridgeMessage{}, nil
 }
@@ -523,6 +542,11 @@ func (sb *SessionBridge) GetStatus() BridgeStatus {
 
 // Close يغلق الجسر
 func (sb *SessionBridge) Close() error {
+	// [SAFETY] Validate current status
+	if sb.Status == BridgeStatusClosed {
+		return fmt.Errorf("bridge is already closed")
+	}
+
 	sb.Status = BridgeStatusClosed
 	return nil
 }
