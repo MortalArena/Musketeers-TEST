@@ -14,6 +14,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/agent/tools"
 	"github.com/MortalArena/Musketeers/pkg/agent/validation"
 	"github.com/MortalArena/Musketeers/pkg/agent/wiring"
+	"github.com/MortalArena/Musketeers/pkg/cache"
 	"github.com/MortalArena/Musketeers/pkg/metrics"
 	"github.com/MortalArena/Musketeers/pkg/providers"
 	"github.com/MortalArena/Musketeers/pkg/session"
@@ -91,6 +92,9 @@ type UnifiedAgent struct {
 
 	// Metrics for performance monitoring
 	metrics *metrics.Metrics
+
+	// LocalCache for caching
+	cache *cache.LocalCache
 
 	logger *zap.Logger
 	mu     sync.RWMutex
@@ -173,6 +177,9 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 
 	// إنشاء Metrics
 	ua.metrics = metrics.NewMetrics(logger)
+
+	// إنشاء LocalCache
+	ua.cache = cache.NewLocalCache(logger)
 
 	return ua
 }
