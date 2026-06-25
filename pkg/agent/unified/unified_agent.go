@@ -557,7 +557,28 @@ func (ua *UnifiedAgent) ExecuteTask(ctx context.Context, task string) (*UnifiedT
 	// إنشاء سياق التنفيذ
 	executionContext := ua.flowManager.CreateExecutionContext(ctx, task)
 
-	// استخدام المنسق لتنسيق التنفيذ مع retry logic
+	// تنفيذ المهمة مع retry logic
+	result, err := ua.executeTaskWithRetry(ctx, task, executionContext)
+	if err != nil {
+		return nil, err
+	}
+
+	// معالجة النتيجة
+	taskResult, err := ua.processTaskResult(ctx, task, result, startTime)
+	if err != nil {
+		return nil, err
+	}
+
+	// تسجيل نجاح المهمة في Metrics
+	if taskResult.Success {
+		ua.metrics.RecordTaskSuccess("execution", ua.agentID)
+	}
+
+	return taskResult, nil
+}
+
+// executeTaskWithRetry ينفذ المهمة مع retry logic
+func (ua *UnifiedAgent) executeTaskWithRetry(ctx context.Context, task string, executionContext *ExecutionContext) (interface{}, error) {
 	maxRetries := 3
 	var lastErr error
 	var result interface{}
@@ -590,11 +611,16 @@ func (ua *UnifiedAgent) ExecuteTask(ctx context.Context, task string) (*UnifiedT
 		recoveryResult := ua.errorHandler.HandleError(ctx, lastErr, executionContext)
 		if recoveryResult.Success {
 			ua.logger.Info("تم استرداد من الخطأ", zap.String("error", lastErr.Error()))
-		} else {
-			return nil, fmt.Errorf("فشل تنفيذ المهمة: %w", lastErr)
+			return result, nil
 		}
+		return nil, fmt.Errorf("فشل تنفيذ المهمة: %w", lastErr)
 	}
 
+	return result, nil
+}
+
+// processTaskResult يعالج نتيجة المهمة
+func (ua *UnifiedAgent) processTaskResult(ctx context.Context, task string, result interface{}, startTime time.Time) (*UnifiedTaskResult, error) {
 	// Type assertion للنتيجة
 	taskResult, ok := result.(*UnifiedTaskResult)
 	if !ok {
@@ -616,11 +642,6 @@ func (ua *UnifiedAgent) ExecuteTask(ctx context.Context, task string) (*UnifiedT
 		zap.Duration("duration", duration),
 		zap.Bool("success", taskResult.Success),
 		zap.Float64("confidence", taskResult.Confidence))
-
-	// تسجيل نجاح المهمة في Metrics
-	if taskResult.Success {
-		ua.metrics.RecordTaskSuccess("execution", ua.agentID)
-	}
 
 	return taskResult, nil
 }
