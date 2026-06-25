@@ -14,6 +14,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/agent/tools"
 	"github.com/MortalArena/Musketeers/pkg/agent/validation"
 	"github.com/MortalArena/Musketeers/pkg/agent/wiring"
+	"github.com/MortalArena/Musketeers/pkg/metrics"
 	"github.com/MortalArena/Musketeers/pkg/providers"
 	"github.com/MortalArena/Musketeers/pkg/session"
 	"github.com/dgraph-io/badger/v4"
@@ -87,6 +88,9 @@ type UnifiedAgent struct {
 
 	// SessionManager for session management
 	sessionManager *SessionManager
+
+	// Metrics for performance monitoring
+	metrics *metrics.Metrics
 
 	logger *zap.Logger
 	mu     sync.RWMutex
@@ -166,6 +170,9 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 		ua.sessionEventBus,
 		logger,
 	)
+
+	// إنشاء Metrics
+	ua.metrics = metrics.NewMetrics(logger)
 
 	return ua
 }
@@ -569,6 +576,9 @@ func (ua *UnifiedAgent) ExecuteTask(ctx context.Context, task string) (*UnifiedT
 	}
 
 	if lastErr != nil {
+		// تسجيل فشل المهمة في Metrics
+		ua.metrics.RecordTaskFailure("execution", ua.agentID, lastErr.Error())
+
 		// استخدام معالج الأخطاء
 		recoveryResult := ua.errorHandler.HandleError(ctx, lastErr, executionContext)
 		if recoveryResult.Success {
@@ -599,6 +609,11 @@ func (ua *UnifiedAgent) ExecuteTask(ctx context.Context, task string) (*UnifiedT
 		zap.Duration("duration", duration),
 		zap.Bool("success", taskResult.Success),
 		zap.Float64("confidence", taskResult.Confidence))
+
+	// تسجيل نجاح المهمة في Metrics
+	if taskResult.Success {
+		ua.metrics.RecordTaskSuccess("execution", ua.agentID)
+	}
 
 	return taskResult, nil
 }
