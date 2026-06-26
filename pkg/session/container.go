@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MortalArena/Musketeers/pkg/agent"
 	"github.com/MortalArena/Musketeers/pkg/agent/tools"
 	"github.com/MortalArena/Musketeers/pkg/eventbus"
 	"github.com/dgraph-io/badger/v4"
@@ -71,6 +72,9 @@ type SessionContainer struct {
 	dirtyMu      sync.Mutex
 	flushTicker  *time.Ticker
 	flushDone    chan struct{}
+
+	// [NEW] التحقق من قدرات الوكلاء
+	CapabilityVerifier *AgentCapabilityVerifier // [WHY] يتحقق من القدرات المعلنة للوكلاء
 }
 
 // [WHY] UnifiedSessionState الحالة الموحدة للجلسة
@@ -85,11 +89,32 @@ type UnifiedSessionState struct {
 }
 
 // [WHY] AgentInfo معلومات الوكيل
+// يحتوي على بيانات الهوية، القدرات المعلنة والمحققة، ومقاييس الأداء
 type AgentInfo struct {
 	DID    string `json:"did"`    // [WHY] معرف الوكيل
 	Name   string `json:"name"`   // [WHY] اسم الوكيل
 	Status string `json:"status"` // [WHY] حالة الوكيل
 	Role   string `json:"role"`   // [WHY] دور الوكيل
+
+	// [WHY] هوية الوكيل من agent.GetInfo()
+	Provider      string `json:"provider,omitempty"`       // [WHY] المزود (claude, openai, ollama)
+	Model         string `json:"model,omitempty"`          // [WHY] النموذج (claude-4, gpt-4o)
+	ContextWindow int    `json:"context_window,omitempty"` // [WHY] حجم نافذة السياق
+	MaxTokens     int    `json:"max_tokens,omitempty"`     // [WHY] الحد الأقصى للتوكنز
+	AgentType     string `json:"agent_type,omitempty"`     // [WHY] نوع الوكيل
+
+	// [WHY] القدرات — المعلنة مقابل المحققة
+	ClaimedCapabilities  []string `json:"claimed_capabilities,omitempty"`  // [WHY] القدرات التي أعلنها الوكيل
+	VerifiedCapabilities  []string `json:"verified_capabilities,omitempty"` // [WHY] القدرات التي تم التحقق منها
+	FailedCapabilities    []string `json:"failed_capabilities,omitempty"`   // [WHY] القدرات التي فشل التحقق منها
+	VerificationStatus    string   `json:"verification_status"`             // [WHY] unverified, verified, partial, failed
+	VerifiedAt            int64    `json:"verified_at,omitempty"`           // [WHY] وقت آخر تحقق
+
+	// [WHY] تتبع الأداء في الجلسة
+	JoinedAt    int64   `json:"joined_at"`              // [WHY] وقت الانضمام
+	LastActive  int64   `json:"last_active,omitempty"`   // [WHY] آخر نشاط
+	TotalTasks  int     `json:"total_tasks"`             // [WHY] إجمالي المهام
+	SuccessRate float64 `json:"success_rate"`            // [WHY] معدل النجاح
 }
 
 // [WHY] TaskInfo معلومات المهمة
@@ -297,6 +322,9 @@ func NewSessionContainer(ctx context.Context, db *badger.DB, config *SessionConf
 	// [NEW] تهيئة سجل الأدوات المركزي
 	session.ToolRegistry = tools.NewToolRegistry()
 	RegisterSessionTools(session.ToolRegistry, session)
+
+	// [NEW] تهيئة مدقق قدرات الوكلاء
+	session.CapabilityVerifier = NewAgentCapabilityVerifier()
 
 	// [WHY] تهيئة الحالة الموحدة
 	session.state = UnifiedSessionState{
@@ -756,6 +784,213 @@ func (s *SessionContainer) updateProgress() {
 	s.dirtyMu.Lock()
 	s.dirty = true
 	s.dirtyMu.Unlock()
+}
+
+// ============================================================
+// Agent Capability Verification — التحقق من قدرات الوكلاء
+// ============================================================
+
+// RegisterAgentFromUnified يسجل وكيلاً في الجلسة مع بياناته الكاملة
+// [WHY] يلتقط بيانات الهوية، القدرات المعلنة، ويجري التحقق
+// [HOW] يستخدم AgentInfo من الوكيل لتعبئة الحقول، ثم يشغل التحقق
+func (s *SessionContainer) RegisterAgentFromUnified(ua agent.UnifiedAgent, role string) (*AgentInfo, error) {
+	if ua == nil {
+		return nil, fmt.Errorf("unified agent cannot be nil")
+	}
+
+	info := ua.GetInfo()
+	if info == nil {
+		return nil, fmt.Errorf("agent info cannot be nil")
+	}
+
+	now := time.Now().UnixMilli()
+
+	// [WHY] جمع القدرات المعلنة
+	claimedCap := ua.GetCapabilities()
+	claimedStrs := make([]string, len(claimedCap))
+	for i, c := range claimedCap {
+		claimedStrs[i] = string(c)
+	}
+
+	// [WHY] إضافة الوكيل إلى الحالة الموحدة
+	err := s.AddAgent(info.ID, info.Name, role)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add agent to session: %w", err)
+	}
+
+	// [WHY] تحديث بيانات الوكيل بالبيانات الكاملة
+	s.stateMu.Lock()
+	for i := range s.state.Agents {
+		if s.state.Agents[i].DID == info.ID {
+			s.state.Agents[i].Provider = info.Provider
+			s.state.Agents[i].Model = info.Model
+			s.state.Agents[i].ContextWindow = info.ContextWindow
+			s.state.Agents[i].MaxTokens = info.MaxTokens
+			s.state.Agents[i].AgentType = string(info.Type)
+			s.state.Agents[i].ClaimedCapabilities = claimedStrs
+			s.state.Agents[i].VerificationStatus = string(VerificationUnverified)
+			s.state.Agents[i].JoinedAt = now
+			s.state.Agents[i].LastActive = now
+		}
+	}
+	stateCopy := s.state
+	s.stateMu.Unlock()
+
+	// [WHY] تسجيل في سجل الأحداث
+	s.Journal.Append(JournalAgentCapabilities, info.ID, "agent",
+		"تم تسجيل الوكيل مع "+fmt.Sprintf("%d", len(claimedStrs))+" قدرة معلنة",
+		map[string]interface{}{
+			"agent_id":      info.ID,
+			"agent_name":    info.Name,
+			"role":          role,
+			"model":         info.Model,
+			"provider":      info.Provider,
+			"capabilities":  claimedStrs,
+		})
+
+	// [WHY] نشر حدث تحديث الحالة
+	s.EventBus.Publish(eventbus.Event{
+		Type:      "session.state.changed",
+		Payload:   stateCopy,
+		Source:    "session_container",
+		SessionID: s.ID,
+	})
+
+	// [WHY] تشغيل التحقق من القدرات
+	report, err := s.CapabilityVerifier.VerifyAll(s.ctx, ua)
+	if err == nil {
+		_ = s.SetAgentVerification(info.ID, report)
+	}
+
+	// إرجاع معلومات الوكيل المحدثة
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	for i := range s.state.Agents {
+		if s.state.Agents[i].DID == info.ID {
+			agentCopy := s.state.Agents[i]
+			return &agentCopy, nil
+		}
+	}
+	return nil, fmt.Errorf("agent not found after registration")
+}
+
+// SetAgentVerification يحدث حالة التحقق لقدرات وكيل
+// [WHY] يخزن نتائج التحقق في AgentInfo للجلسة
+func (s *SessionContainer) SetAgentVerification(agentID string, report *VerificationReport) error {
+	if report == nil {
+		return fmt.Errorf("verification report cannot be nil")
+	}
+
+	s.stateMu.Lock()
+	found := false
+	for i := range s.state.Agents {
+		if s.state.Agents[i].DID == agentID {
+			s.state.Agents[i].VerifiedCapabilities = report.Verified
+			s.state.Agents[i].FailedCapabilities = report.Failed
+			s.state.Agents[i].VerificationStatus = report.OverallStatus
+			s.state.Agents[i].VerifiedAt = report.VerifiedAt.UnixMilli()
+			found = true
+			break
+		}
+	}
+	stateCopy := s.state
+	s.stateMu.Unlock()
+
+	if !found {
+		return fmt.Errorf("agent %s not found in session", agentID)
+	}
+
+	// [WHY] تسجيل في سجل الأحداث
+	statusEmoji := report.OverallStatus
+	s.Journal.Append(JournalCapabilityVerification, agentID, "system",
+		"تم التحقق من قدرات الوكيل: "+statusEmoji,
+		map[string]interface{}{
+			"agent_id":  agentID,
+			"verified":  report.Verified,
+			"failed":    report.Failed,
+			"status":    report.OverallStatus,
+			"probes":    len(report.Probes),
+		})
+
+	// [WHY] نشر حدث تحديث الحالة
+	s.EventBus.Publish(eventbus.Event{
+		Type:      "session.state.changed",
+		Payload:   stateCopy,
+		Source:    "session_container",
+		SessionID: s.ID,
+	})
+
+	return nil
+}
+
+// GetVerifiedCapabilities يرجع القدرات المحققة فقط لوكيل
+// [WHY] يوفر مصدر موثوق للقدرات لتوزيع المهام
+func (s *SessionContainer) GetVerifiedCapabilities(agentID string) []string {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+
+	for i := range s.state.Agents {
+		if s.state.Agents[i].DID == agentID {
+			return s.state.Agents[i].VerifiedCapabilities
+		}
+	}
+	return nil
+}
+
+// UpdateAgentTaskResult يحدث إحصائيات أداء الوكيل بعد تنفيذ مهمة
+// [WHY] يحتفظ بسجل أداء حقيقي لكل وكيل داخل الجلسة
+func (s *SessionContainer) UpdateAgentTaskResult(agentID string, success bool) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+
+	for i := range s.state.Agents {
+		if s.state.Agents[i].DID == agentID {
+			now := time.Now().UnixMilli()
+			s.state.Agents[i].LastActive = now
+			s.state.Agents[i].TotalTasks++
+
+			total := float64(s.state.Agents[i].TotalTasks)
+			if total > 0 {
+				// Simple moving average
+				if success {
+					s.state.Agents[i].SuccessRate = (s.state.Agents[i].SuccessRate*(total-1) + 1.0) / total
+				} else {
+					s.state.Agents[i].SuccessRate = (s.state.Agents[i].SuccessRate * (total - 1)) / total
+				}
+			}
+
+			// Hybrid Persistence: علامة للحفظ
+			s.dirtyMu.Lock()
+			s.dirty = true
+			s.dirtyMu.Unlock()
+			break
+		}
+	}
+}
+
+// AgentRecord يرجع سجل كامل لوكيل في الجلسة
+// [WHY] يعطي صورة كاملة عن الوكيل: هويته، قدراته، أداؤه
+func (s *SessionContainer) AgentRecord(agentID string) *AgentInfo {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+
+	for i := range s.state.Agents {
+		if s.state.Agents[i].DID == agentID {
+			record := s.state.Agents[i]
+			return &record
+		}
+	}
+	return nil
+}
+
+// AllAgentRecords يرجع سجلات جميع الوكلاء في الجلسة
+func (s *SessionContainer) AllAgentRecords() []AgentInfo {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+
+	records := make([]AgentInfo, len(s.state.Agents))
+	copy(records, s.state.Agents)
+	return records
 }
 
 // SessionExportData يحتوي على جميع بيانات الجلسة للتصدير

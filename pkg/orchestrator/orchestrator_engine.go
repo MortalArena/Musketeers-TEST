@@ -11,6 +11,7 @@ import (
 	capgithub "github.com/MortalArena/Musketeers/pkg/capability/github"
 	"github.com/MortalArena/Musketeers/pkg/eventbus"
 	"github.com/MortalArena/Musketeers/pkg/policy"
+	"github.com/MortalArena/Musketeers/pkg/session"
 	"github.com/MortalArena/Musketeers/pkg/verification"
 	"go.uber.org/zap"
 )
@@ -96,6 +97,7 @@ type OrchestratorEngine struct {
 	eventBus          *eventbus.EventBus
 	policyEngine      *policy.Engine
 	unifiedAgent      *unified.UnifiedAgent // مرجع للتكامل مع UnifiedAgent
+	sessionContainer  *session.SessionContainer // [NEW] مرجع للجلسة لمزامنة قدرات الوكلاء المحققة
 	logger            *zap.Logger
 	mu                sync.RWMutex
 	running           bool
@@ -150,6 +152,14 @@ func (oe *OrchestratorEngine) SetUnifiedAgent(ua *unified.UnifiedAgent) {
 	oe.logger.Info("تم ضبط UnifiedAgent في OrchestratorEngine")
 }
 
+// SetSessionContainer يضبط مرجع SessionContainer لمزامنة قدرات الوكلاء
+func (oe *OrchestratorEngine) SetSessionContainer(sc *session.SessionContainer) {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+	oe.sessionContainer = sc
+	oe.logger.Info("تم ضبط SessionContainer في OrchestratorEngine")
+}
+
 // SetConnector يضبط Connector System في OrchestratorEngine
 func (oe *OrchestratorEngine) SetConnector(c *Connector) {
 	oe.mu.Lock()
@@ -169,6 +179,13 @@ func (oe *OrchestratorEngine) SetPolicyMode(mode capability.PolicyMode) {
 // PolicyEngine يرجع Policy Engine الخاص بـ OrchestratorEngine لإضافة القواعد
 func (oe *OrchestratorEngine) PolicyEngine() *policy.Engine {
 	return oe.policyEngine
+}
+
+// GetSessionContainer يرجع SessionContainer
+func (oe *OrchestratorEngine) GetSessionContainer() *session.SessionContainer {
+	oe.mu.RLock()
+	defer oe.mu.RUnlock()
+	return oe.sessionContainer
 }
 
 // GetConnector يرجع Connector System
@@ -251,6 +268,7 @@ func (oe *OrchestratorEngine) ExecuteTask(ctx context.Context, task *agent.Agent
 		return nil, fmt.Errorf("orchestrator engine is not running")
 	}
 	ua := oe.unifiedAgent
+	sc := oe.sessionContainer
 	oe.mu.RUnlock()
 
 	if ua != nil {
@@ -259,11 +277,16 @@ func (oe *OrchestratorEngine) ExecuteTask(ctx context.Context, task *agent.Agent
 			return nil, fmt.Errorf("failed to execute task via UnifiedAgent: %w", err)
 		}
 		output, _ := thinkingResult.(string)
-		return &agent.TaskExecutionResult{
+		result := &agent.TaskExecutionResult{
 			Success:  true,
 			Output:   output,
 			Duration: 0,
-		}, nil
+		}
+		// تسجيل النتيجة في الجلسة
+		if sc != nil {
+			sc.UpdateAgentTaskResult("unified", result.Success)
+		}
+		return result, nil
 	}
 
 	// Fallback: تحديد القدرات المطلوبة للمهمة والبحث عن أفضل وكيل
@@ -289,6 +312,11 @@ func (oe *OrchestratorEngine) ExecuteTask(ctx context.Context, task *agent.Agent
 	}
 	oe.registry.UpdateStats(bestAgentID, result.Success, tokensUsed, result.Duration)
 
+	// تسجيل النتيجة في الجلسة
+	if sc != nil {
+		sc.UpdateAgentTaskResult(bestAgentID, result.Success)
+	}
+
 	oe.logger.Info("Task executed",
 		zap.String("task_id", task.ID),
 		zap.String("agent_id", bestAgentID),
@@ -302,11 +330,12 @@ func (oe *OrchestratorEngine) ExecuteTask(ctx context.Context, task *agent.Agent
 // ExecuteTaskWithRole ينفذ مهمة باستخدام وكيل بدور محدد
 func (oe *OrchestratorEngine) ExecuteTaskWithRole(ctx context.Context, task *agent.AgentTask, role AgentRole) (*agent.TaskExecutionResult, error) {
 	oe.mu.RLock()
-	defer oe.mu.RUnlock()
-
 	if !oe.running {
+		oe.mu.RUnlock()
 		return nil, fmt.Errorf("orchestrator engine is not running")
 	}
+	sc := oe.sessionContainer
+	oe.mu.RUnlock()
 
 	// تحديد القدرات المطلوبة للمهمة
 	requiredCapabilities := oe.getRequiredCapabilities(task)
@@ -337,6 +366,11 @@ func (oe *OrchestratorEngine) ExecuteTaskWithRole(ctx context.Context, task *age
 		}
 	}
 	oe.registry.UpdateStats(agentID, result.Success, tokensUsed, result.Duration)
+
+	// تسجيل النتيجة في الجلسة
+	if sc != nil {
+		sc.UpdateAgentTaskResult(agentID, result.Success)
+	}
 
 	oe.logger.Info("Task executed with role",
 		zap.String("task_id", task.ID),
@@ -389,26 +423,56 @@ func (oe *OrchestratorEngine) RegisterAgent(agentObj agent.UnifiedAgent, metadat
 		return fmt.Errorf("orchestrator engine is not running")
 	}
 
-	// تسجيل الوكيل في السجل
+	agentID := agentObj.GetInfo().ID
+
+	// [1] تسجيل الوكيل في السجل
 	if err := oe.registry.Register(agentObj, metadata); err != nil {
 		return err
 	}
 
-	// تهيئة الوكيل في مدير دورة الحياة
-	oe.lifecycleManager.InitializeAgent(agentObj.GetInfo().ID)
+	// [2] تهيئة الوكيل في مدير دورة الحياة
+	oe.lifecycleManager.InitializeAgent(agentID)
 
-	// اقتراح دور للوكيل
-	role, err := oe.roleAssigner.SuggestRole(agentObj.GetInfo().ID)
+	// [3] تسجيل الوكيل في الجلسة مع التحقق من القدرات
+	if oe.sessionContainer != nil {
+		suggestedRole, _ := oe.roleAssigner.SuggestRole(agentID)
+		agentRole := string(suggestedRole)
+		agentInfo, err := oe.sessionContainer.RegisterAgentFromUnified(agentObj, agentRole)
+		if err != nil {
+			oe.logger.Warn("Failed to register agent in session",
+				zap.String("agent_id", agentID),
+				zap.Error(err),
+			)
+		} else {
+			// [4] تسجيل القدرات المحققة في CapabilityMatcher
+			verifiedCaps := agentInfo.VerifiedCapabilities
+			if len(verifiedCaps) == 0 {
+				verifiedCaps = agentInfo.ClaimedCapabilities
+			}
+			oe.registerAgentCapabilities(agentID, verifiedCaps)
+		}
+	} else {
+		// بدون جلسة — نسجل القدرات المعلنة مباشرة
+		caps := agentObj.GetCapabilities()
+		capStrs := make([]string, len(caps))
+		for i, c := range caps {
+			capStrs[i] = string(c)
+		}
+		oe.registerAgentCapabilities(agentID, capStrs)
+	}
+
+	// [5] اقتراح دور للوكيل
+	role, err := oe.roleAssigner.SuggestRole(agentID)
 	if err != nil {
 		oe.logger.Warn("Failed to suggest role for agent",
-			zap.String("agent_id", agentObj.GetInfo().ID),
+			zap.String("agent_id", agentID),
 			zap.Error(err),
 		)
 	} else {
 		// تعيين الدور المقترح
-		if err := oe.roleAssigner.AssignRole(agentObj.GetInfo().ID, role, 1.0); err != nil {
+		if err := oe.roleAssigner.AssignRole(agentID, role, 1.0); err != nil {
 			oe.logger.Warn("Failed to assign suggested role",
-				zap.String("agent_id", agentObj.GetInfo().ID),
+				zap.String("agent_id", agentID),
 				zap.String("role", string(role)),
 				zap.Error(err),
 			)
@@ -416,11 +480,41 @@ func (oe *OrchestratorEngine) RegisterAgent(agentObj agent.UnifiedAgent, metadat
 	}
 
 	oe.logger.Info("Agent registered in orchestrator",
-		zap.String("agent_id", agentObj.GetInfo().ID),
+		zap.String("agent_id", agentID),
 		zap.String("suggested_role", string(role)),
 	)
 
 	return nil
+}
+
+// registerAgentCapabilities يسجل القدرات في CapabilityMatcher
+func (oe *OrchestratorEngine) registerAgentCapabilities(agentID string, capStrs []string) {
+	caps := make([]agent.AgentCapability, len(capStrs))
+	for i, s := range capStrs {
+		caps[i] = agent.AgentCapability(s)
+	}
+	oe.capabilityMatcher.RegisterCapabilities(agentID, caps)
+}
+
+// SyncAgentCapabilities يزامن القدرات المحققة من الجلسة إلى CapabilityMatcher
+// [WHY] يُستدعى بعد اكتمال التحقق من قدرات وكيل
+func (oe *OrchestratorEngine) SyncAgentCapabilities(agentID string) {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+
+	if oe.sessionContainer == nil {
+		return
+	}
+
+	// الحصول على القدرات المحققة من الجلسة
+	verifiedCaps := oe.sessionContainer.GetVerifiedCapabilities(agentID)
+	if len(verifiedCaps) > 0 {
+		oe.registerAgentCapabilities(agentID, verifiedCaps)
+		oe.logger.Info("Synced verified capabilities from session",
+			zap.String("agent_id", agentID),
+			zap.Int("verified_count", len(verifiedCaps)),
+		)
+	}
 }
 
 // UnregisterAgent يلغي تسجيل وكيل

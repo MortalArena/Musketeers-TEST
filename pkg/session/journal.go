@@ -48,6 +48,9 @@ const (
 	JournalImported JournalEntryType = "session.imported"
 	JournalJoined   JournalEntryType = "session.joined"
 	JournalLeft     JournalEntryType = "session.left"
+
+	JournalCapabilityVerification JournalEntryType = "capability.verification"
+	JournalAgentCapabilities      JournalEntryType = "agent.capabilities"
 )
 
 // JournalEntry إدخال واحد في سجل الجلسة
