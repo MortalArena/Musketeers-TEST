@@ -12,6 +12,7 @@ import (
 
 	"github.com/MortalArena/Musketeers/api"
 	"github.com/MortalArena/Musketeers/pkg/acp"
+	pkgCapability "github.com/MortalArena/Musketeers/pkg/capability"
 	pkgAgent "github.com/MortalArena/Musketeers/pkg/agent"
 	pkgAdapters "github.com/MortalArena/Musketeers/pkg/agent/adapters"
 	"github.com/MortalArena/Musketeers/pkg/agent/unified"
@@ -685,14 +686,14 @@ func main() {
 	_ = acp.NewRouter()
 	log.Info("ACP handlers registered")
 
-	// [FIX] UnifiedAgent handles all coordination internally
-	log.Info("UnifiedAgent handles all agent coordination, session management, and orchestration")
+	// [FIX] تفعيل الـ Policy Engine في وضع Audit (يسجل الرفض دون منع)
+	// التعليمات: هذا يضمن أن كل مسار تنفيذ يمر عبر طبقة الصلاحيات من اليوم الأول
+	// مع log-only حتى مرحلة الإنتاج
+	oePolicy := orchestratorEngine.PolicyEngine()
+	orchestratorEngine.SetPolicyMode(pkgCapability.PolicyModeAudit)
+	log.Info("Policy mode set to AUDIT — denials are logged, execution is NOT blocked")
 
-	// إنشاء ExternalPlatformManager لإدارة المنصات الخارجية
-	// ملاحظة: ExternalPlatformManager يتطلب capability.Manager
-	// [SAFETY] إنشاء policy.Engine حقيقي بدلاً من nil
-	policyEngine := pkgPolicy.NewEngine()
-	// إضافة قاعدة افتراضية للسماح بالعمليات الأساسية
+	// إضافة قاعدة افتراضية deny مع قواعد allow للعمليات الأساسية
 	defaultRule := pkgPolicy.Rule{
 		Name:     "default-deny",
 		Priority: 0,
@@ -704,11 +705,10 @@ func main() {
 			{Type: "*", Action: "*"},
 		},
 	}
-	if err := policyEngine.AddRule(defaultRule); err != nil {
+	if err := oePolicy.AddRule(defaultRule); err != nil {
 		log.WithError(err).Warn("Failed to add default policy rule")
 	}
 
-	// [FIX] Add allow rules for basic operations
 	allowRules := []pkgPolicy.Rule{
 		{
 			Name:     "allow-read-own-data",
@@ -768,11 +768,11 @@ func main() {
 	}
 
 	for _, rule := range allowRules {
-		if err := policyEngine.AddRule(rule); err != nil {
+		if err := oePolicy.AddRule(rule); err != nil {
 			log.WithError(err).Warnf("Failed to add allow rule: %s", rule.Name)
 		}
 	}
-	log.WithField("rules", len(allowRules)).Info("Allow rules added to policy engine")
+	log.WithField("rules", len(allowRules)+1).Info("Policy rules added to OrchestratorEngine — Audit mode active")
 
 	// [FIX] UnifiedAgent handles all coordination internally
 	log.Info("UnifiedAgent handles all agent coordination, session management, and orchestration")

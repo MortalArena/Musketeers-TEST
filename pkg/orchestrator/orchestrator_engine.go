@@ -158,6 +158,19 @@ func (oe *OrchestratorEngine) SetConnector(c *Connector) {
 	oe.logger.Info("تم ضبط Connector في OrchestratorEngine")
 }
 
+// SetPolicyMode يضبط وضع الـ Policy للـ Capability Manager
+func (oe *OrchestratorEngine) SetPolicyMode(mode capability.PolicyMode) {
+	oe.capabilityManager.SetPolicyMode(mode)
+	oe.logger.Info("تم ضبط وضع الـ Policy",
+		zap.Int("mode", int(mode)),
+	)
+}
+
+// PolicyEngine يرجع Policy Engine الخاص بـ OrchestratorEngine لإضافة القواعد
+func (oe *OrchestratorEngine) PolicyEngine() *policy.Engine {
+	return oe.policyEngine
+}
+
 // GetConnector يرجع Connector System
 func (oe *OrchestratorEngine) GetConnector() *Connector {
 	oe.mu.RLock()
