@@ -359,6 +359,8 @@ func main() {
 	if err != nil {
 		log.WithError(err).Fatal("Failed to create session container")
 	}
+	// [FIX] بدء Hybrid Persistence — حفظ كل 30 ثانية إذا كان هناك تغيير
+	sessionContainer.StartFlushWorker(ctx)
 	log.WithField("session_id", sessionContainer.ID).Info("Session Container created")
 
 	// [FIX] Create UnifiedAgent instance
@@ -454,17 +456,19 @@ func main() {
 	}
 	log.WithField("registered_providers", len(activeProviders)).Info("Providers registered (API keys not configured — will use heuristics)")
 
-	// [FIX] Test UnifiedAgent execution (مع timeout قصير لأنه بدون API key)
-	// نستخدم goroutine منفصلة حتى لا نمنع بدء الخادم
+	// [FIX] Test execution عبر OrchestratorEngine (Phase A من Canonical Path)
 	go func() {
 		taskCtx, taskCancel := context.WithTimeout(context.Background(), 15*time.Second)
-		taskCancel() // نلغي فوراً لأن ما في API key — التشغيل بدون LLM
-		testTask := "تحليل ملفات المشروع"
-		result, err := unifiedAgent.ExecuteTaskWithThinking(taskCtx, testTask)
+		taskCancel()
+		testTask := &pkgAgent.AgentTask{
+			ID:    "test-task-1",
+			Title: "تحليل ملفات المشروع",
+		}
+		result, err := orchestratorEngine.ExecuteTask(taskCtx, testTask)
 		if err != nil {
-			log.WithError(err).Warn("Test task with thinking completed with error (expected without API key)")
+			log.WithError(err).Warn("Test task via OrchestratorEngine completed with error (expected without API key)")
 		} else {
-			log.WithField("result", result).Info("Test task executed successfully with thinking")
+			log.WithField("result", result).Info("Test task executed successfully via OrchestratorEngine")
 		}
 		log.Info("Studio initialization complete — all systems operational")
 	}()

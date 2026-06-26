@@ -246,16 +246,29 @@ func (oe *OrchestratorEngine) IsRunning() bool {
 // ExecuteTask ينفذ مهمة باستخدام أفضل وكيل متاح
 func (oe *OrchestratorEngine) ExecuteTask(ctx context.Context, task *agent.AgentTask) (*agent.TaskExecutionResult, error) {
 	oe.mu.RLock()
-	defer oe.mu.RUnlock()
-
 	if !oe.running {
+		oe.mu.RUnlock()
 		return nil, fmt.Errorf("orchestrator engine is not running")
 	}
+	ua := oe.unifiedAgent
+	oe.mu.RUnlock()
 
-	// تحديد القدرات المطلوبة للمهمة
+	if ua != nil {
+		thinkingResult, err := ua.ExecuteTaskWithThinking(ctx, task.Title)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute task via UnifiedAgent: %w", err)
+		}
+		output, _ := thinkingResult.(string)
+		return &agent.TaskExecutionResult{
+			Success:  true,
+			Output:   output,
+			Duration: 0,
+		}, nil
+	}
+
+	// Fallback: تحديد القدرات المطلوبة للمهمة والبحث عن أفضل وكيل
 	requiredCapabilities := oe.getRequiredCapabilities(task)
 
-	// البحث عن أفضل وكيل
 	bestAgentObj, err := oe.registry.FindBestAgent(requiredCapabilities)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find suitable agent: %w", err)
@@ -263,13 +276,11 @@ func (oe *OrchestratorEngine) ExecuteTask(ctx context.Context, task *agent.Agent
 
 	bestAgentID := bestAgentObj.GetInfo().ID
 
-	// تنفيذ المهمة
 	result, err := bestAgentObj.ExecuteTask(ctx, task)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute task: %w", err)
 	}
 
-	// تحديث إحصائيات الوكيل
 	tokensUsed := 0
 	if result.Metrics != nil {
 		if val, ok := result.Metrics["tokens"].(int); ok {

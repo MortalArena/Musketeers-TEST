@@ -65,6 +65,12 @@ type SessionContainer struct {
 	mu         sync.RWMutex
 	ctx        context.Context
 	cancelFunc context.CancelFunc
+
+	// Hybrid Persistence
+	dirty        bool
+	dirtyMu      sync.Mutex
+	flushTicker  *time.Ticker
+	flushDone    chan struct{}
 }
 
 // [WHY] UnifiedSessionState الحالة الموحدة للجلسة
@@ -328,9 +334,71 @@ func (s *SessionContainer) Save() error {
 	}
 
 	key := fmt.Sprintf("session:%s", s.ID)
-	return s.DB.Update(func(txn *badger.Txn) error {
+	err = s.DB.Update(func(txn *badger.Txn) error {
 		return txn.Set([]byte(key), data)
 	})
+	if err == nil {
+		s.dirtyMu.Lock()
+		s.dirty = false
+		s.dirtyMu.Unlock()
+	}
+	return err
+}
+
+// MarkDirty يعلن أن الجلسة بحاجة للحفظ (لنظام Hybrid Persistence)
+func (s *SessionContainer) MarkDirty() {
+	s.dirtyMu.Lock()
+	s.dirty = true
+	s.dirtyMu.Unlock()
+}
+
+// StartFlushWorker يبدأ عامل دوري يحفظ الجلسة كل 30 ثانية إذا كانت متسخة
+func (s *SessionContainer) StartFlushWorker(ctx context.Context) {
+	s.flushTicker = time.NewTicker(30 * time.Second)
+	s.flushDone = make(chan struct{})
+	go func() {
+		defer close(s.flushDone)
+		for {
+			select {
+			case <-s.flushTicker.C:
+				s.dirtyMu.Lock()
+				isDirty := s.dirty
+				s.dirtyMu.Unlock()
+				if isDirty {
+					if err := s.Save(); err != nil {
+						// log would go through EventBus if needed
+					}
+				}
+			case <-ctx.Done():
+				// Flush one last time before stopping
+				s.dirtyMu.Lock()
+				isDirty := s.dirty
+				s.dirtyMu.Unlock()
+				if isDirty {
+					_ = s.Save()
+				}
+				return
+			}
+		}
+	}()
+}
+
+// StopFlushWorker يوقف عامل الحفظ الدوري
+func (s *SessionContainer) StopFlushWorker() {
+	if s.flushTicker != nil {
+		s.flushTicker.Stop()
+	}
+}
+
+// FlushNow يحفظ فوراً إذا كانت الجلسة متسخة
+func (s *SessionContainer) FlushNow() error {
+	s.dirtyMu.Lock()
+	isDirty := s.dirty
+	s.dirtyMu.Unlock()
+	if !isDirty {
+		return nil
+	}
+	return s.Save()
 }
 
 // Load يحمل الجلسة من BadgerDB
@@ -354,6 +422,7 @@ func (s *SessionContainer) Stop() error {
 	s.cancelFunc()
 	s.Status = "paused"
 	s.UpdatedAt = time.Now()
+	s.MarkDirty()
 
 	s.EventBus.Publish(eventbus.Event{
 		Type:      "session.paused",
@@ -682,6 +751,11 @@ func (s *SessionContainer) updateProgress() {
 	}
 
 	s.state.UpdatedAt = time.Now()
+
+	// Hybrid Persistence: أي تغيير في الحالة = علامة للحفظ
+	s.dirtyMu.Lock()
+	s.dirty = true
+	s.dirtyMu.Unlock()
 }
 
 // SessionExportData يحتوي على جميع بيانات الجلسة للتصدير

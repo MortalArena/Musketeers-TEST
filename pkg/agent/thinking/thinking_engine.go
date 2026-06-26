@@ -4319,9 +4319,6 @@ func (te *ThinkingEngine) GetCurrentPhase(ctx context.Context) (ThinkingPhase, e
 
 // SetPhase يضبط المرحلة الحالية
 func (te *ThinkingEngine) SetPhase(ctx context.Context, phase ThinkingPhase) error {
-	te.mu.Lock()
-	defer te.mu.Unlock()
-
 	te.currentPhase.Store(phase)
 
 	te.logger.Info("تغييرت مرحلة التفكير",
