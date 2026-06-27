@@ -107,7 +107,8 @@ func (ra *RoleAssignment) validateRoleCapabilities(role AgentRole, capabilities 
 		// المتخصص يحتاج إلى قدرات محددة حسب التخصص
 		return len(capabilities) > 0
 	default:
-		return false
+		// الأدوار المخصصة غير المعروفة مقبولة — لا نريد منع الوكيل من العمل
+		return true
 	}
 }
 

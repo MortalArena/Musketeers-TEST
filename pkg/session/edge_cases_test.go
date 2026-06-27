@@ -41,7 +41,7 @@ func TestSessionContainer_EmptySessionID(t *testing.T) {
 	newContainer, err := NewSessionContainer(ctx, db, config, eb)
 	require.NoError(t, err)
 
-	err = newContainer.Import(exportData)
+	err = newContainer.Import(exportData, db, eb)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "معرف الجلسة فارغ")
 }
@@ -77,7 +77,7 @@ func TestSessionContainer_MismatchedSessionID(t *testing.T) {
 	// محاولة استيراد جلسة بمعرف مختلف
 	exportData.SessionContainer.ID = "different-session-id"
 
-	err = newContainer.Import(exportData)
+	err = newContainer.Import(exportData, db, eb)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "لا يمكن استيراد جلسة بمعرف مختلف")
 }
@@ -104,7 +104,7 @@ func TestSessionContainer_NilImport(t *testing.T) {
 	container, err := NewSessionContainer(ctx, db, config, eb)
 	require.NoError(t, err)
 
-	err = container.Import(nil)
+	err = container.Import(nil, db, eb)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "بيانات التصدير فارغة")
 }

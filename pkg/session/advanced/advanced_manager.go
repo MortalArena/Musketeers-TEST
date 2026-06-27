@@ -8,6 +8,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// SessionMode وضع الجلسة — تحكم أوتوماتيكي أو يدوي
+type SessionMode string
+
+const (
+	SessionModeAuto   SessionMode = "auto"   // Session Manager Agent يقرر كل شيء
+	SessionModeManual SessionMode = "manual" // البشر يحددون أدوار الوكلاء مسبقاً
+)
+
 // AdvancedSessionManager مدير الجلسة المتطور
 type AdvancedSessionManager struct {
 	sessionID string
@@ -20,6 +28,9 @@ type AdvancedSessionManager struct {
 	sessionStatus       SessionStatus
 	activeAgents        []string
 	sessionManagerAgent string
+	sessionMode         SessionMode
+	manualAssignments   map[string]string // agentID -> role (للوضع اليدوي فقط)
+	agentIndex          int               // عداد round-robin لتوزيع المهام
 
 	// إدارة المهام
 	taskDistributionStrategy TaskDistributionStrategy
@@ -91,12 +102,13 @@ type TaskScheduler struct {
 	logger    *zap.Logger
 }
 
-// NewAdvancedSessionManager ينشئ مدير جلسة متطور جديد
+// NewAdvancedSessionManager ينشئ مدير جلسة متطور جديد (الوضع الافتراضي: auto)
 func NewAdvancedSessionManager(sessionID string, logger *zap.Logger) *AdvancedSessionManager {
 	return &AdvancedSessionManager{
 		sessionID:                sessionID,
 		logger:                   logger,
 		sessionStatus:            SessionStatusInitializing,
+		sessionMode:              SessionModeAuto,
 		taskDistributionStrategy: StrategyMixed,
 		activeTasks:              make(map[string]*SessionTask),
 		taskHistory:              []*SessionTask{},
@@ -125,6 +137,36 @@ func (asm *AdvancedSessionManager) Initialize(ctx context.Context) error {
 		zap.Time("start_time", asm.sessionStartTime))
 
 	return nil
+}
+
+// SetMode يضبط وضع الجلسة (auto/manual)
+func (asm *AdvancedSessionManager) SetMode(mode SessionMode) {
+	asm.mu.Lock()
+	defer asm.mu.Unlock()
+	asm.sessionMode = mode
+	asm.logger.Info("تم ضبط وضع الجلسة",
+		zap.String("session_id", asm.sessionID),
+		zap.String("mode", string(mode)))
+}
+
+// SetManualAssignments يضبط التوزيع اليدوي للوكلاء على الأدوار (للوضع manual فقط)
+func (asm *AdvancedSessionManager) SetManualAssignments(assignments map[string]string) {
+	asm.mu.Lock()
+	defer asm.mu.Unlock()
+	asm.manualAssignments = make(map[string]string)
+	for k, v := range assignments {
+		asm.manualAssignments[k] = v
+	}
+	asm.logger.Info("تم ضبط التوزيع اليدوي للوكلاء",
+		zap.String("session_id", asm.sessionID),
+		zap.Int("assignments", len(assignments)))
+}
+
+// GetMode يرجع وضع الجلسة الحالي
+func (asm *AdvancedSessionManager) GetMode() SessionMode {
+	asm.mu.RLock()
+	defer asm.mu.RUnlock()
+	return asm.sessionMode
 }
 
 // ReceivePrompt يستقبل البرومبت من العميل
@@ -207,21 +249,18 @@ func (asm *AdvancedSessionManager) estimateTime() time.Duration {
 }
 
 // determineRequiredAgents يحدد الوكلاء المطلوبين
+// لم يعد يستخدم أدواراً وهمية — Session Manager Agent أو البشر يقررون
 func (asm *AdvancedSessionManager) determineRequiredAgents() []string {
-	complexity := asm.evaluateComplexity()
-
-	switch complexity {
-	case ComplexityLow:
-		return []string{"coder"}
-	case ComplexityMedium:
-		return []string{"coder", "reviewer"}
-	case ComplexityHigh:
-		return []string{"coder", "reviewer", "architect"}
-	case ComplexityCritical:
-		return []string{"coder", "reviewer", "architect", "tester"}
-	default:
-		return []string{"coder"}
+	if asm.sessionMode == SessionModeManual && len(asm.manualAssignments) > 0 {
+		agents := make([]string, 0, len(asm.manualAssignments))
+		for agentID := range asm.manualAssignments {
+			agents = append(agents, agentID)
+		}
+		return agents
 	}
+
+	// Auto Mode: لا نقيد بعدد محدد من الوكلاء
+	return []string{}
 }
 
 // recommendStrategy يوصي بالاستراتيجية

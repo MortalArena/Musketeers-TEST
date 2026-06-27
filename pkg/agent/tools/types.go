@@ -97,6 +97,7 @@ func (td *ToolDefinition) HasPermission(role AgentRole) bool {
 	case RoleRegular:
 		return role == RoleRegular || role == RoleManager
 	default:
-		return false
+		// الأدوار المخصصة: المدير لديه صلاحية كاملة، أو التطابق التام
+		return role == RoleManager || role == td.RequiredRole
 	}
 }

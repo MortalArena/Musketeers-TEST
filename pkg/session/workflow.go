@@ -240,29 +240,37 @@ func (we *WorkflowEngine) GetCurrentPhase() int {
 }
 
 // Execute16StepWorkflow ينفذ ورك فلو من 16 خطوة
+// [SAFETY] لا يحمل we.mu أثناء استدعاء addTaskLocked لتجنب Deadlock (sync.RWMutex غير قابل لإعادة الدخول)
 func (we *WorkflowEngine) Execute16StepWorkflow(ctx context.Context, task string, thinkingEngine interface{}) (map[string]interface{}, error) {
 	we.mu.Lock()
-	defer we.mu.Unlock()
-
-	// التأكد من وجود 16 مرحلة
 	if len(we.Phases) != 16 {
+		we.mu.Unlock()
 		return nil, fmt.Errorf("يجب أن يكون هناك 16 مرحلة")
 	}
+	we.State = "running"
+	we.StartedAt = time.Now()
+	we.mu.Unlock()
 
 	// تهيئة حالة الورك فلو
 	workflowState := make(map[string]interface{})
 	workflowState["task"] = task
 
 	// تنفيذ الخطوات الـ 16 بشكل متسلسل
+	// [SAFETY] لا نحمل القفل خلال التنفيذ الطويل — نقفل فقط لتحديث الحالة
 	for i := 0; i < 16; i++ {
+		we.mu.Lock()
 		we.Phases[i].Status = "active"
 		we.Phases[i].StartedAt = time.Now()
 		we.CurrentPhase = i
+		we.mu.Unlock()
 
-		// تنفيذ الخطوة
+		// تنفيذ الخطوة (خارج القفل)
 		stepResult, err := we.executeStep(ctx, i, workflowState, thinkingEngine)
 		if err != nil {
+			we.mu.Lock()
 			we.Phases[i].Status = "failed"
+			we.State = "failed"
+			we.mu.Unlock()
 			return nil, fmt.Errorf("فشل في الخطوة %d: %w", i+1, err)
 		}
 
@@ -270,24 +278,40 @@ func (we *WorkflowEngine) Execute16StepWorkflow(ctx context.Context, task string
 		workflowState[fmt.Sprintf("step_%d", i+1)] = stepResult
 
 		// إكمال الخطوة
+		we.mu.Lock()
 		we.Phases[i].Status = "completed"
 		we.Phases[i].CompletedAt = time.Now()
 		we.Phases[i].Progress = 100
 
-		// إضافة مهمة للخطوة
-		we.AddTask(i, Task{
+		// [FIX] استخدام الدالة الداخلية لتجنب Deadlock (لا تستدعي mu.Lock)
+		we.addTaskLocked(i, Task{
 			Description: we.getStepDescription(i),
 			Status:      "completed",
 			Progress:    100,
 			CompletedAt: time.Now(),
 		})
+		we.calculateProgress()
+		we.UpdatedAt = time.Now()
+		we.mu.Unlock()
 	}
 
+	we.mu.Lock()
 	we.State = "completed"
 	we.UpdatedAt = time.Now()
-	we.calculateProgress()
+	we.mu.Unlock()
 
 	return workflowState, nil
+}
+
+// addTaskLocked يضيف مهمة لمرحلة — يجب أن يُستدعى داخل we.mu.Lock()
+// [WHY] نسخة داخلية لا تقفل بنفسها لتجنب Deadlock من Execute16StepWorkflow
+func (we *WorkflowEngine) addTaskLocked(phaseIndex int, task Task) {
+	if phaseIndex >= len(we.Phases) {
+		return
+	}
+	task.ID = fmt.Sprintf("task_%d_%d", phaseIndex, len(we.Phases[phaseIndex].Tasks)+1)
+	task.StartedAt = time.Now()
+	we.Phases[phaseIndex].Tasks = append(we.Phases[phaseIndex].Tasks, task)
 }
 
 // executeStep ينفذ خطوة معينة عبر StepExecutor إذا كان متاحاً

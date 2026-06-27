@@ -76,7 +76,7 @@ func TestSessionContainer_ExportImport_Comprehensive(t *testing.T) {
 	newContainer.ID = container.ID
 
 	// استيراد البيانات مباشرة
-	err = newContainer.Import(exportData)
+	err = newContainer.Import(exportData, db, eb)
 	require.NoError(t, err)
 
 	// التحقق من البيانات المستوردة

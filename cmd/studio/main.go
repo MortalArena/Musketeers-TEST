@@ -405,11 +405,10 @@ func main() {
 	}
 	defer orchestratorEngine.Stop(ctx)
 
-	// [FIX] تسجيل جميع وكلاء AgentRegistry في النظام الموحد (فقط في UnifiedAgent،
-	// لأن OrchestratorEngine يشارك نفس AgentRegistry والوكلاء مسجلين فيه بالفعل)
+	// [FIX] تسجيل جميع وكلاء AgentRegistry في النظام الموحد
 	for _, agentObj := range agentRegistry.ListAll() {
 		info := agentObj.GetInfo()
-		// تسجيل في UnifiedAgent فقط
+		// تسجيل في UnifiedAgent (skill manager + subagent manager)
 		if err := unifiedAgent.RegisterAgent(
 			ctx,
 			info.ID,
@@ -419,8 +418,13 @@ func main() {
 		); err != nil {
 			log.WithError(err).Warnf("Failed to register agent %s in unified system", info.ID)
 		}
+
+		// تسجيل الـ adapter نفسه في AgentPool (ThinkingEngine + ToolExecutor)
+		if err := unifiedAgent.RegisterAgentToPool(agentObj, "regular"); err != nil {
+			log.WithError(err).Warnf("Failed to register agent %s in AgentPool", info.ID)
+		}
 	}
-	log.WithField("agent_count", agentRegistry.GetCount()).Info("Agents registered in unified system and orchestrator")
+	log.WithField("agent_count", agentRegistry.GetCount()).Info("Agents registered in unified system, orchestrator, and AgentPool")
 
 	// [FIX] Create Provider Registry for LLM providers
 	providerRegistry := builtin.NewRegistry()

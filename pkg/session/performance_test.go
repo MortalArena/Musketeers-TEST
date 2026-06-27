@@ -294,7 +294,7 @@ func TestSessionContainer_ImportPerformance(t *testing.T) {
 	start := time.Now()
 
 	// استيراد البيانات
-	err = newContainer.Import(exportData)
+	err = newContainer.Import(exportData, db, eb)
 	require.NoError(t, err)
 
 	duration := time.Since(start)

@@ -228,6 +228,7 @@ func (usm *UnifiedSessionManager) CompleteSession(sessionID string) error {
 }
 
 // AssignRole يضبط دور وكيل في الجلسة
+// أي دور يمكن تعيينه — لا يوجد "manager" فقط. النظام يدير الأدوار حسب SessionMode.
 func (usm *UnifiedSessionManager) AssignRole(sessionID, agentID string, role string) error {
 	usm.mu.Lock()
 	defer usm.mu.Unlock()
@@ -237,9 +238,27 @@ func (usm *UnifiedSessionManager) AssignRole(sessionID, agentID string, role str
 		return fmt.Errorf("الجلسة %s غير موجودة", sessionID)
 	}
 
+	// نخزن الدور في AgentInstances إذا كانت النسخة موجودة
+	if inst, ok := session.AgentInstances[agentID]; ok {
+		inst.Role = role
+	} else {
+		usm.logger.Warn("وكيل غير مسجل في AgentInstances، يتم إضافته",
+			zap.String("agent_id", agentID))
+		// إنشاء إدخال جديد
+		session.AgentInstances[agentID] = &AgentInstanceInfo{
+			AgentID:    agentID,
+			InstanceID: agentID,
+			Role:       role,
+			Status:     "active",
+			JoinedAt:   time.Now(),
+		}
+	}
+
+	// ندير ManagerAgentID بشكل منفصل — يمكن أن يكون أي وكيل
 	if role == "manager" {
 		session.ManagerAgentID = agentID
 	} else {
+		// أي دور غير manager يضاف إلى AssistantAgents
 		found := false
 		for _, id := range session.AssistantAgents {
 			if id == agentID {

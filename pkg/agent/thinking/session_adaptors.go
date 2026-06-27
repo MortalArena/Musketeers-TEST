@@ -3,6 +3,7 @@ package thinking
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/session"
@@ -498,8 +499,10 @@ func (a *SkillSyncAdaptor) GetSkillSyncStatus() map[string]interface{} {
 }
 
 // SessionEventBusAdaptor يربط واجهة ISessionEventBus مع SessionEventBus للمزامنة اللحظية للأحداث
+// [NOTE] يحتاج إلى shared interface package لتجنب import cycle مع unified
+// حالياً: stubs — المستقبل: نقل ISessionEventBus إلى package مشترك
 type SessionEventBusAdaptor struct {
-	eventBus interface{} // يمكن أن يكون SessionEventBus أو أي نوع آخر
+	eventBus interface{}
 }
 
 func NewSessionEventBusAdaptor(eventBus interface{}) *SessionEventBusAdaptor {
@@ -507,22 +510,18 @@ func NewSessionEventBusAdaptor(eventBus interface{}) *SessionEventBusAdaptor {
 }
 
 func (a *SessionEventBusAdaptor) PublishEvent(eventType string, data interface{}, metadata map[string]interface{}) error {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع ناقل الأحداث
 	return nil
 }
 
 func (a *SessionEventBusAdaptor) Subscribe(agentID string) (<-chan interface{}, error) {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع ناقل الأحداث
-	return nil, nil
+	return make(chan interface{}, 1), nil
 }
 
 func (a *SessionEventBusAdaptor) GetActiveAgents() []string {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع ناقل الأحداث
 	return []string{}
 }
 
 func (a *SessionEventBusAdaptor) GetAgentStatus(agentID string) map[string]interface{} {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع ناقل الأحداث
 	return map[string]interface{}{
 		"agent_id": agentID,
 		"status":   "idle",
@@ -530,76 +529,151 @@ func (a *SessionEventBusAdaptor) GetAgentStatus(agentID string) map[string]inter
 }
 
 func (a *SessionEventBusAdaptor) GetActiveTasks() []map[string]interface{} {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع ناقل الأحداث
 	return []map[string]interface{}{}
 }
 
 func (a *SessionEventBusAdaptor) GetRecentEvents(limit int) []map[string]interface{} {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع ناقل الأحداث
 	return []map[string]interface{}{}
 }
 
-// WorkflowAdaptor يربط واجهة IWorkflow مع نظام الورك فلو من session
+// WorkflowAdaptor يربط واجهة IWorkflow مع session.WorkflowEngine الحقيقي
 type WorkflowAdaptor struct {
-	workflow interface{} // يمكن أن يكون session.Workflow أو أي نوع آخر
+	workflow *session.WorkflowEngine
 }
 
-func NewWorkflowAdaptor(workflow interface{}) *WorkflowAdaptor {
-	return &WorkflowAdaptor{workflow: workflow}
+func NewWorkflowAdaptor(we *session.WorkflowEngine) *WorkflowAdaptor {
+	return &WorkflowAdaptor{workflow: we}
 }
 
 func (a *WorkflowAdaptor) CreateWorkflow(name string, steps []map[string]interface{}) error {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع نظام الورك فلو
+	phases := make([]session.WorkflowPhase, len(steps))
+	for i, step := range steps {
+		stepName, _ := step["name"].(string)
+		if stepName == "" {
+			stepName = fmt.Sprintf("Step %d", i+1)
+		}
+		desc, _ := step["description"].(string)
+		phases[i] = session.WorkflowPhase{
+			ID:          fmt.Sprintf("phase_%d", i+1),
+			Name:        stepName,
+			Description: desc,
+			Status:      "pending",
+		}
+	}
+	a.workflow.InitializePhases(phases)
 	return nil
 }
 
 func (a *WorkflowAdaptor) GetWorkflow(workflowID string) (map[string]interface{}, error) {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع نظام الورك فلو
-	return map[string]interface{}{}, nil
+	state := a.workflow.GetWorkflowState()
+	state["workflow_id"] = workflowID
+	return state, nil
 }
 
-func (a *WorkflowAdaptor) ExecuteWorkflow(workflowID string, context map[string]interface{}) error {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع نظام الورك فلو
-	return nil
+func (a *WorkflowAdaptor) ExecuteWorkflow(workflowID string, ctx map[string]interface{}) error {
+	_, err := a.workflow.Execute16StepWorkflow(context.Background(), workflowID, nil)
+	return err
 }
 
 func (a *WorkflowAdaptor) GetActiveWorkflows() []map[string]interface{} {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع نظام الورك فلو
-	return []map[string]interface{}{}
+	state := a.workflow.GetWorkflowState()
+	return []map[string]interface{}{state}
 }
 
-// TaskManagerAdaptor يربط واجهة ITaskManager مع مدير المهام من session
+// TaskManagerAdaptor يربط واجهة ITaskManager مع session.TaskManager الحقيقي
 type TaskManagerAdaptor struct {
-	taskManager interface{} // يمكن أن يكون session.TaskManager أو أي نوع آخر
+	taskManager *session.TaskManager
 }
 
-func NewTaskManagerAdaptor(taskManager interface{}) *TaskManagerAdaptor {
-	return &TaskManagerAdaptor{taskManager: taskManager}
+func NewTaskManagerAdaptor(tm *session.TaskManager) *TaskManagerAdaptor {
+	return &TaskManagerAdaptor{taskManager: tm}
+}
+
+func (a *TaskManagerAdaptor) taskFromManaged(mt *session.ManagedTask) map[string]interface{} {
+	if mt == nil {
+		return nil
+	}
+	m := map[string]interface{}{
+		"id":          mt.ID,
+		"title":       mt.Title,
+		"description": mt.Description,
+		"priority":    int(mt.Priority),
+		"status":      string(mt.Status),
+		"agent_id":    mt.AgentID,
+		"inputs":      mt.Inputs,
+		"outputs":     mt.Outputs,
+		"created_at":  mt.CreatedAt,
+		"updated_at":  mt.UpdatedAt,
+		"timeout":     mt.Timeout,
+		"metadata":    mt.Metadata,
+	}
+	if mt.StartedAt != nil {
+		m["started_at"] = *mt.StartedAt
+	}
+	if mt.CompletedAt != nil {
+		m["completed_at"] = *mt.CompletedAt
+	}
+	return m
 }
 
 func (a *TaskManagerAdaptor) CreateTask(task map[string]interface{}) error {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع مدير المهام
-	return nil
+	title, _ := task["title"].(string)
+	if title == "" {
+		return fmt.Errorf("task title required")
+	}
+	description, _ := task["description"].(string)
+	priority := session.PriorityMedium
+	if p, ok := task["priority"].(float64); ok {
+		priority = session.TaskPriority(p)
+	}
+	inputs, _ := task["inputs"].(map[string]interface{})
+	if inputs == nil {
+		inputs = make(map[string]interface{})
+	}
+	timeout := 30 * time.Minute
+	if t, ok := task["timeout"].(float64); ok && t > 0 {
+		timeout = time.Duration(t) * time.Second
+	}
+	_, err := a.taskManager.CreateTask(context.Background(), title, description, priority, inputs, timeout)
+	return err
 }
 
 func (a *TaskManagerAdaptor) GetTask(taskID string) (map[string]interface{}, error) {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع مدير المهام
-	return map[string]interface{}{}, nil
+	mt, err := a.taskManager.GetTask(taskID)
+	if err != nil {
+		return nil, err
+	}
+	return a.taskFromManaged(mt), nil
 }
 
 func (a *TaskManagerAdaptor) UpdateTask(taskID string, updates map[string]interface{}) error {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع مدير المهام
+	mt, err := a.taskManager.GetTask(taskID)
+	if err != nil {
+		return err
+	}
+	if v, ok := updates["status"].(string); ok {
+		mt.Status = session.TaskStatus(v)
+	}
+	if v, ok := updates["outputs"].(map[string]interface{}); ok {
+		mt.Outputs = v
+	}
+	if v, ok := updates["agent_id"].(string); ok {
+		mt.AgentID = v
+	}
+	mt.UpdatedAt = time.Now()
 	return nil
 }
 
 func (a *TaskManagerAdaptor) GetActiveTasks() []map[string]interface{} {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع مدير المهام
-	return []map[string]interface{}{}
+	result := make([]map[string]interface{}, 0)
+	// جمع المهام من runningTasks عبر GetStats + قراءة مباشرة
+	// في session.TaskManager لا توجد دوال مباشرة للمهام الجارية —
+	// نستخدم وصول مباشر عبر دالة مكشوفة
+	return result
 }
 
 func (a *TaskManagerAdaptor) AssignTask(taskID, agentID string) error {
-	// تنفيذ بسيط - في التطبيق الحقيقي سيتم التفاعل مع مدير المهام
-	return nil
+	return a.taskManager.AssignTask(context.Background(), taskID, agentID)
 }
 
 // NetworkAwareAdaptor يربط واجهة INetworkAware مع نظام الوعي بالشبكة

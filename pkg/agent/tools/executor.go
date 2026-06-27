@@ -109,11 +109,10 @@ func (te *ToolExecutor) GetRegistry() *ToolRegistry {
 // [HOW] 1. فحص العداد 2. فحص الصلاحية 3. فحص المسارات 4. أقفال الملفات 5. التنفيذ
 // [SAFETY] ثلاث طبقات أمان: عداد، صلاحية، مسار
 func (te *ToolExecutor) ExecuteTool(ctx context.Context, taskID, toolName string, params map[string]interface{}) (interface{}, error) {
-	// [SAFETY] الطبقة 1: فحص العدادات
-	if !te.checkToolCallLimit(taskID) {
+	// [SAFETY] الطبقة 1: فحص العدادات (atomic check+increment)
+	if !te.tryAcquireToolCall(taskID) {
 		return nil, fmt.Errorf("تجاوز الحد الأقصى لاستدعاءات الأدوات: %d", te.MaxToolCallsPerTask)
 	}
-	te.incrementToolCallCount(taskID)
 
 	// [SAFETY] الطبقة 2: فحص الصلاحية عبر registry
 	if te.registry != nil {
@@ -845,20 +844,15 @@ func (te *ToolExecutor) gitOperation(ctx context.Context, params map[string]inte
 // أدوات المساعدة
 // ============================================================
 
-func (te *ToolExecutor) checkToolCallLimit(taskID string) bool {
-	te.taskCallMu.RLock()
-	defer te.taskCallMu.RUnlock()
-	count, exists := te.taskCallCount[taskID]
-	if !exists {
-		return true
-	}
-	return count < te.MaxToolCallsPerTask
-}
-
-func (te *ToolExecutor) incrementToolCallCount(taskID string) {
+func (te *ToolExecutor) tryAcquireToolCall(taskID string) bool {
 	te.taskCallMu.Lock()
 	defer te.taskCallMu.Unlock()
-	te.taskCallCount[taskID]++
+	count := te.taskCallCount[taskID]
+	if count >= te.MaxToolCallsPerTask {
+		return false
+	}
+	te.taskCallCount[taskID] = count + 1
+	return true
 }
 
 func (te *ToolExecutor) isPathAllowed(path string) bool {

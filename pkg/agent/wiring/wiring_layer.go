@@ -39,19 +39,19 @@ type Adapter interface {
 type Connection struct {
 	From     string
 	To       string
-	Priority int // 1-10، 10 هو الأعلى
+	Priority int    // 1-10، 10 هو الأعلى
 	Status   string // "pending", "active", "failed"
 }
 
 // NewWiringLayer ينشئ طبقة توصيل جديدة
 func NewWiringLayer(sessionID, agentID string, logger *zap.Logger) *WiringLayer {
 	return &WiringLayer{
-		sessionID:  sessionID,
-		agentID:    agentID,
-		logger:     logger,
-		adapters:   make(map[string]Adapter),
+		sessionID:   sessionID,
+		agentID:     agentID,
+		logger:      logger,
+		adapters:    make(map[string]Adapter),
 		connections: make(map[string][]Connection),
-		connected:  false,
+		connected:   false,
 	}
 }
 
@@ -312,20 +312,35 @@ func (wl *WiringLayer) AutoWire(ctx context.Context) error {
 		{"EventBus", "SyncManager", 2},
 		// SyncManager يجب أن يتصل بـ CollectiveSystem
 		{"SyncManager", "CollectiveSystem", 1},
+		// [NEW] ContextReranker يجب أن يتصل بـ ThinkingEngine (للبحث السياقي)
+		{"ContextReranker", "ThinkingEngine", 11},
 	}
 
-	// إضافة الاتصالات بناءً على القواعد
+	// إضافة الاتصالات بناءً على القواعد (snapshot تحت RLock لتجنب data race)
+	wl.mu.RLock()
+	snapshot := make([]struct {
+		from, to string
+		priority int
+	}, 0, len(rules))
 	for _, rule := range rules {
-		if _, exists := wl.adapters[rule.from]; exists {
-			if _, exists := wl.adapters[rule.to]; exists {
-				if err := wl.AddConnection(rule.from, rule.to, rule.priority); err != nil {
-					wl.logger.Warn("فشل إضافة اتصال تلقائي",
-						zap.String("from", rule.from),
-						zap.String("to", rule.to),
-						zap.Error(err),
-					)
-				}
+		if _, ok := wl.adapters[rule.from]; ok {
+			if _, ok := wl.adapters[rule.to]; ok {
+				snapshot = append(snapshot, struct {
+					from, to string
+					priority int
+				}{rule.from, rule.to, rule.priority})
 			}
+		}
+	}
+	wl.mu.RUnlock()
+
+	for _, r := range snapshot {
+		if err := wl.AddConnection(r.from, r.to, r.priority); err != nil {
+			wl.logger.Warn("فشل إضافة اتصال تلقائي",
+				zap.String("from", r.from),
+				zap.String("to", r.to),
+				zap.Error(err),
+			)
 		}
 	}
 

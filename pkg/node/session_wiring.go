@@ -255,7 +255,7 @@ func WireSessionComponents(ctx context.Context, cfg *SessionWiringConfig) (*Sess
 				if sc.Journal != nil && len(export.JournalEntries) > 0 {
 					sc.Journal.Import(export.JournalEntries)
 				}
-				if err := sc.Import(export); err != nil {
+				if err := sc.Import(export, sc.DB, sc.EventBus); err != nil {
 					log.WithError(err).Warn("فشل استيراد حالة الجلسة")
 				}
 			}

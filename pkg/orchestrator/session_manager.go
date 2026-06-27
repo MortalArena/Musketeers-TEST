@@ -26,8 +26,9 @@ type SessionInfo struct {
 	ID              string
 	Name            string
 	OwnerDID        string
-	ManagerAgentID  string   // وكيل المدير
-	AssistantAgents []string // الوكلاء المساعدين
+	ManagerAgentID  string            // وكيل المدير
+	AssistantAgents []string          // الوكلاء المساعدين
+	RoleAssignments map[string]string // agentID -> role (أدوار مخصصة)
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Status          string // active, paused, completed
@@ -75,6 +76,7 @@ func (sm *SessionManager) CreateSession(ctx context.Context, name, ownerDID stri
 		OwnerDID:        ownerDID,
 		ManagerAgentID:  managerAgentID,
 		AssistantAgents: assistantAgents,
+		RoleAssignments: make(map[string]string),
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 		Status:          "active",
@@ -103,6 +105,7 @@ func (sm *SessionManager) CreateSession(ctx context.Context, name, ownerDID stri
 }
 
 // AssignRole يضبط دور وكيل في الجلسة
+// أي دور يمكن تعيينه — لا يوجد "manager" فقط. النظام يدير الأدوار حسب الحاجة.
 func (sm *SessionManager) AssignRole(sessionID, agentID string, role string, capabilities []agent.AgentCapability, permissions []string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -112,6 +115,13 @@ func (sm *SessionManager) AssignRole(sessionID, agentID string, role string, cap
 		return fmt.Errorf("الجلسة %s غير موجودة", sessionID)
 	}
 
+	// تخزين الدور في RoleAssignments بغض النظر عن القيمة
+	if session.RoleAssignments == nil {
+		session.RoleAssignments = make(map[string]string)
+	}
+	session.RoleAssignments[agentID] = role
+
+	// إدارة ManagerAgentID/AssistantAgents للتوافق مع الأنظمة القديمة
 	if role == "manager" {
 		session.ManagerAgentID = agentID
 	} else {

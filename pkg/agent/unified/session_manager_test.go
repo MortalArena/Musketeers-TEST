@@ -42,6 +42,7 @@ func TestSessionManager_Initialize(t *testing.T) {
 
 	sm := NewSessionManager(sessionID, logger)
 	ua := NewUnifiedAgent(sessionID, "test_agent", db, logger)
+	sm.SetEventBus(ua.sessionEventBus) // [FIX] EventBus مطلوب قبل Initialize
 
 	ctx := context.Background()
 	if err := sm.Initialize(ctx, ua); err != nil {
@@ -265,31 +266,28 @@ func TestSessionManager_determineRequiredAgents(t *testing.T) {
 
 	sm := NewSessionManager(sessionID, logger)
 
-	// اختبار وكلاء منخفض
+	// Auto mode: لا ترجع أدواراً وهمية — Session Manager Agent يقرر
 	sm.clientPrompt = "قصير"
 	agents := sm.determineRequiredAgents()
-	if len(agents) != 1 || agents[0] != "coder" {
-		t.Errorf("وكلاء منخفض غير متطابق: got %v, want [coder]", agents)
+	if len(agents) != 0 {
+		t.Errorf("Auto mode: توقعت قائمة فارغة لكن وجدت: %v", agents)
 	}
 
-	// اختبار وكلاء متوسط
-	sm.clientPrompt = string(make([]byte, 300))
-	agents = sm.determineRequiredAgents()
-	if len(agents) != 2 || agents[0] != "coder" || agents[1] != "reviewer" {
-		t.Errorf("وكلاء متوسط غير متطابق: got %v, want [coder reviewer]", agents)
-	}
-
-	// اختبار وكلاء عالي
-	sm.clientPrompt = string(make([]byte, 600))
-	agents = sm.determineRequiredAgents()
-	if len(agents) != 3 || agents[0] != "coder" || agents[1] != "reviewer" || agents[2] != "architect" {
-		t.Errorf("وكلاء عالي غير متطابق: got %v, want [coder reviewer architect]", agents)
-	}
-
-	// اختبار وكلاء حرج
+	// Auto mode مع برومبت طويل
 	sm.clientPrompt = string(make([]byte, 1200))
 	agents = sm.determineRequiredAgents()
-	if len(agents) != 4 || agents[0] != "coder" || agents[1] != "reviewer" || agents[2] != "architect" || agents[3] != "tester" {
-		t.Errorf("وكلاء حرج غير متطابق: got %v, want [coder reviewer architect tester]", agents)
+	if len(agents) != 0 {
+		t.Errorf("Auto mode مع برومبت طويل: توقعت قائمة فارغة لكن وجدت: %v", agents)
+	}
+
+	// Manual mode: ترجع الوكلاء المعينين يدوياً
+	sm.SetMode(SessionModeManual)
+	sm.SetManualAssignments(map[string]string{
+		"agent-1": "backend",
+		"agent-2": "frontend",
+	})
+	agents = sm.determineRequiredAgents()
+	if len(agents) != 2 {
+		t.Errorf("Manual mode: توقعت وكيلين لكن وجدت %d: %v", len(agents), agents)
 	}
 }

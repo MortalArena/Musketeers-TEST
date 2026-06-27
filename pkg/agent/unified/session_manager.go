@@ -2,10 +2,23 @@ package unified
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/MortalArena/Musketeers/pkg/agent/thinking"
 	"go.uber.org/zap"
+)
+
+// SessionMode وضع الجلسة — تحكم أوتوماتيكي أو يدوي
+type SessionMode string
+
+const (
+	SessionModeAuto   SessionMode = "auto"   // Session Manager Agent يقرر كل شيء
+	SessionModeManual SessionMode = "manual" // البشر يحددون أدوار الوكلاء مسبقاً
 )
 
 // SessionManager مدير الجلسة المتطور
@@ -14,12 +27,17 @@ type SessionManager struct {
 	logger    *zap.Logger
 	mu        sync.RWMutex
 
+	// AgentPool — يدير جميع وكلاء الجلسة (كل وكيل حقيقي بمكوناته الكاملة)
+	agentPool *AgentPool
+
 	// معلومات الجلسة
 	clientPrompt        string
 	sessionStartTime    time.Time
 	sessionStatus       SessionStatus
-	activeAgents        []string
 	sessionManagerAgent string // وكيل مدير الجلسة
+	sessionMode         SessionMode
+	manualAssignments   map[string]string // agentID -> role (للوضع اليدوي فقط)
+	agentIndex          int               // عداد round-robin لتوزيع المهام
 
 	// إدارة المهام
 	taskDistributionStrategy TaskDistributionStrategy
@@ -103,20 +121,40 @@ type TaskEvaluation struct {
 	RecommendedStrategy TaskDistributionStrategy
 }
 
-// NewSessionManager ينشئ مدير جلسة جديد
+// NewSessionManager ينشئ مدير جلسة جديد (الوضع الافتراضي: auto)
+// [FIX] لا ينشئ EventBus داخلياً — يستقبله من الخارج (UnifiedAgent) لضمان وجود EventBus واحد فقط
 func NewSessionManager(sessionID string, logger *zap.Logger) *SessionManager {
 	return &SessionManager{
 		sessionID:                sessionID,
 		logger:                   logger,
 		sessionStatus:            SessionStatusInitializing,
+		sessionMode:              SessionModeAuto,
 		taskDistributionStrategy: StrategyMixed,
 		activeTasks:              make(map[string]*SessionTask),
 		taskHistory:              []*SessionTask{},
 		memorySync:               NewRealTimeMemorySync(sessionID, logger),
-		skillSync:                NewRealTimeSkillSync(sessionID, logger),
-		eventBus:                 NewSessionEventBus(sessionID, logger),
+		skillSync:               NewRealTimeSkillSync(sessionID, logger),
+		eventBus:                 nil,
 		taskScheduler:            NewTaskScheduler(sessionID, logger),
 	}
+}
+
+// SetAgentPool يضبط AgentPool الخاص بالجلسة ويربطه بـ EventBus
+func (sm *SessionManager) SetAgentPool(pool *AgentPool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.agentPool = pool
+	if sm.eventBus != nil {
+		pool.SetEventBus(sm.eventBus)
+	}
+}
+
+// SetEventBus يضبط EventBus للجلسة (يُستخدم عندما يكون هناك EventBus موحد من UnifiedAgent)
+// [WHY] يجب استدعاؤها بعد NewSessionManager وقبل أي استخدام لـ EventBus
+func (sm *SessionManager) SetEventBus(eventBus *SessionEventBus) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.eventBus = eventBus
 }
 
 // Initialize يهيئ مدير الجلسة
@@ -145,6 +183,36 @@ func (sm *SessionManager) Initialize(ctx context.Context, agentExecutor AgentExe
 		zap.Time("start_time", sm.sessionStartTime))
 
 	return nil
+}
+
+// SetMode يضبط وضع الجلسة (auto/manual)
+func (sm *SessionManager) SetMode(mode SessionMode) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.sessionMode = mode
+	sm.logger.Info("تم ضبط وضع الجلسة",
+		zap.String("session_id", sm.sessionID),
+		zap.String("mode", string(mode)))
+}
+
+// SetManualAssignments يضبط التوزيع اليدوي للوكلاء على الأدوار (للوضع manual فقط)
+func (sm *SessionManager) SetManualAssignments(assignments map[string]string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.manualAssignments = make(map[string]string)
+	for k, v := range assignments {
+		sm.manualAssignments[k] = v
+	}
+	sm.logger.Info("تم ضبط التوزيع اليدوي للوكلاء",
+		zap.String("session_id", sm.sessionID),
+		zap.Int("assignments", len(assignments)))
+}
+
+// GetMode يرجع وضع الجلسة الحالي
+func (sm *SessionManager) GetMode() SessionMode {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.sessionMode
 }
 
 // ReceivePrompt يستقبل البرومبت من العميل
@@ -375,12 +443,47 @@ func (sm *SessionManager) DistributeTasks(ctx context.Context, tasks []*SessionT
 	return nil
 }
 
-// selectAgentForTask يختار وكيل للمهمة
+// selectAgentForTask يختار وكيل للمهمة حسب وضع الجلسة
+// Auto: round-robin عبر الوكلاء النشطين من AgentPool
+// Manual: يبحث في manualAssignments أولاً، ثم round-robin
 func (sm *SessionManager) selectAgentForTask(task *SessionTask) string {
-	if len(sm.activeAgents) == 0 {
+	// الحصول على الوكلاء النشطين من AgentPool
+	activeAgents := sm.getActiveAgentIDs()
+	if len(activeAgents) == 0 {
 		return sm.sessionManagerAgent
 	}
-	return sm.activeAgents[0]
+
+	// Manual: ابحث عن وكيل مخصص لهذه المهمة
+	if sm.sessionMode == SessionModeManual && len(sm.manualAssignments) > 0 {
+		for agentID, role := range sm.manualAssignments {
+			if contains(task.Description, role) || contains(role, task.Description) {
+				for _, active := range activeAgents {
+					if active == agentID {
+						return agentID
+					}
+				}
+			}
+		}
+	}
+
+	// Auto أو fallback: round-robin عبر الوكلاء النشطين
+	sm.agentIndex = (sm.agentIndex + 1) % len(activeAgents)
+	return activeAgents[sm.agentIndex]
+}
+
+// getActiveAgentIDs يعيد قائمة IDs الوكلاء النشطين من AgentPool
+// [FIXED] تستخدم GetActiveAgents() بدلاً من GetAllAgents()
+// لمنع تعيين مهام لوكلاء مركونين (parked) ليس لديهم ThinkingEngine
+func (sm *SessionManager) getActiveAgentIDs() []string {
+	if sm.agentPool != nil {
+		return sm.agentPool.GetActiveAgents()
+	}
+	return nil
+}
+
+// contains helper بسيط للبحث عن نص داخل نص آخر
+func contains(str, substr string) bool {
+	return strings.Contains(str, substr)
 }
 
 // ExecuteTasks ينفذ المهام
@@ -404,7 +507,7 @@ func (sm *SessionManager) ExecuteTasks(ctx context.Context) error {
 	return nil
 }
 
-// executeTaskConcurrently ينفذ مهمة بالتزامن
+// executeTaskConcurrently ينفذ مهمة بالتزامن — مع توجيه لـ ThinkingEngine الوكيل المحدد
 func (sm *SessionManager) executeTaskConcurrently(ctx context.Context, task *SessionTask) {
 	task.Status = TaskStatusRunning
 	now := time.Now()
@@ -416,7 +519,8 @@ func (sm *SessionManager) executeTaskConcurrently(ctx context.Context, task *Ses
 		"assigned_to": task.AssignedTo,
 	})
 
-	result, err := sm.agentExecutor.ExecuteTask(ctx, task.Description)
+	// [FIX] توجيه المهمة لـ ThinkingEngine الوكيل المحدد (وليس main agent فقط)
+	result, err := sm.routeTaskToAgent(ctx, task)
 	if err != nil {
 		task.Status = TaskStatusFailed
 		task.Error = err
@@ -443,13 +547,13 @@ func (sm *SessionManager) executeTaskConcurrently(ctx context.Context, task *Ses
 	})
 }
 
-// executeTaskSequentially ينفذ مهمة بالدور
+// executeTaskSequentially ينفذ مهمة بالدور — مع توجيه لـ ThinkingEngine الوكيل المحدد
 func (sm *SessionManager) executeTaskSequentially(ctx context.Context, task *SessionTask) error {
 	task.Status = TaskStatusRunning
 	now := time.Now()
 	task.StartedAt = &now
 
-	result, err := sm.agentExecutor.ExecuteTask(ctx, task.Description)
+	result, err := sm.routeTaskToAgent(ctx, task)
 	if err != nil {
 		task.Status = TaskStatusFailed
 		task.Error = err
@@ -462,6 +566,41 @@ func (sm *SessionManager) executeTaskSequentially(ctx context.Context, task *Ses
 	task.CompletedAt = &completedAt
 
 	return nil
+}
+
+// routeTaskToAgent يوجه المهمة لـ ThinkingEngine الوكيل المحدد
+// [FIX] المهمة تذهب للوكيل المعين في task.AssignedTo بدلاً من main agent دائماً
+func (sm *SessionManager) routeTaskToAgent(ctx context.Context, task *SessionTask) (interface{}, error) {
+	if task.AssignedTo != "" && task.AssignedTo != sm.sessionManagerAgent && sm.agentPool != nil {
+		agentTE, err := sm.agentPool.GetOrCreateThinkingEngine(task.AssignedTo)
+		if err == nil && agentTE != nil {
+			sm.logger.Info("توجيه المهمة لـ ThinkingEngine الوكيل المحدد",
+				zap.String("task_id", task.ID),
+				zap.String("assigned_to", task.AssignedTo),
+			)
+			result, err := agentTE.AnalyzeTask(ctx, task.Description)
+			if err != nil {
+				return nil, fmt.Errorf("فشل تنفيذ المهمة عبر الوكيل %s: %w", task.AssignedTo, err)
+			}
+			// تمرير النتيجة عبر ExecuteWithWorkflow للتنفيذ الكامل
+			workflowResult, err := agentTE.ExecuteWithWorkflow(ctx, task.Description)
+			if err != nil {
+				return nil, fmt.Errorf("فشل سير العمل للوكيل %s: %w", task.AssignedTo, err)
+			}
+			return map[string]interface{}{
+				"analysis": result,
+				"workflow": workflowResult,
+				"agent_id": task.AssignedTo,
+			}, nil
+		}
+		sm.logger.Warn("فشل الحصول على ThinkingEngine للوكيل، استخدام main agent كاحتياط",
+			zap.String("assigned_to", task.AssignedTo),
+			zap.Error(err),
+		)
+	}
+
+	// احتياط: main agent
+	return sm.agentExecutor.ExecuteTask(ctx, task.Description)
 }
 
 // MonitorTasks يراقب المهام بشكل لحظي
@@ -504,7 +643,7 @@ func (sm *SessionManager) GetSessionSummary(ctx context.Context) (*SessionSummar
 		ClientPrompt:        sm.clientPrompt,
 		SessionStartTime:    sm.sessionStartTime,
 		SessionStatus:       sm.sessionStatus,
-		ActiveAgents:        sm.activeAgents,
+		ActiveAgents:        sm.getActiveAgentIDs(),
 		SessionManagerAgent: sm.sessionManagerAgent,
 		ActiveTasks:         len(sm.activeTasks),
 		TaskHistory:         len(sm.taskHistory),
@@ -563,21 +702,104 @@ func (sm *SessionManager) estimateTime() time.Duration {
 }
 
 // determineRequiredAgents يحدد الوكلاء المطلوبين
+// لم يعد يستخدم أدواراً وهمية — Session Manager Agent يقرر الاحتياجات الفعلية
+// في Auto Mode: Session Manager Agent يحلل المهمة ويحدد الوكلاء المطلوبين
+// في Manual Mode: البشر يحددون التوزيع يدوياً
 func (sm *SessionManager) determineRequiredAgents() []string {
-	complexity := sm.evaluateComplexity()
-
-	switch complexity {
-	case ComplexityLow:
-		return []string{"coder"}
-	case ComplexityMedium:
-		return []string{"coder", "reviewer"}
-	case ComplexityHigh:
-		return []string{"coder", "reviewer", "architect"}
-	case ComplexityCritical:
-		return []string{"coder", "reviewer", "architect", "tester"}
-	default:
-		return []string{"coder"}
+	if sm.sessionMode == SessionModeManual && len(sm.manualAssignments) > 0 {
+		agents := make([]string, 0, len(sm.manualAssignments))
+		for agentID := range sm.manualAssignments {
+			agents = append(agents, agentID)
+		}
+		return agents
 	}
+
+	// Auto Mode: لا نقيد بعدد محدد من الوكلاء
+	// Session Manager Agent سيقرر الاحتياجات وقت التنفيذ
+	return []string{}
+}
+
+// QueryProjectContext يجيب على أسئلة حول قاعدة الشيفرة بالكامل
+// يستخدم ContextReranker للبحث في جميع ملفات المشروع
+func (sm *SessionManager) QueryProjectContext(ctx context.Context, query string) (*thinking.CodeContextResult, error) {
+	// الحصول على ThinkingEngine الخاص بمدير الجلسة
+	agentTE, err := sm.agentPool.GetOrCreateThinkingEngine(sm.sessionManagerAgent)
+	if err != nil {
+		return nil, fmt.Errorf("فشل الوصول لمحرك التفكير: %w", err)
+	}
+
+	// تهيئة ContextReranker إذا لم يكن موجوداً
+	if agentTE.GetContextReranker() == nil {
+		// تحديد مسار المشروع (نبحث عن go.mod)
+		projectRoot := sm.detectProjectRoot()
+		agentTE.InitContextReranker(projectRoot)
+	}
+
+	// تنفيذ البحث السياقي
+	chunks, err := agentTE.SearchContext(ctx, query, 10)
+	if err != nil {
+		return nil, fmt.Errorf("فشل البحث في السياق: %w", err)
+	}
+
+	// تحويل RerankedChunks إلى CodeChunks للتوافق
+	codeChunks := make([]*thinking.CodeChunk, len(chunks))
+	for i, c := range chunks {
+		codeChunks[i] = c.CodeChunk
+	}
+
+	// بناء النتيجة
+	var summaryBuilder strings.Builder
+	summaryBuilder.WriteString(fmt.Sprintf("نتائج البحث عن \"%s\":\n", query))
+
+	if len(codeChunks) == 0 {
+		summaryBuilder.WriteString("لم أجد نتائج متعلقة في قاعدة الشيفرة.")
+	} else {
+		fileSet := make(map[string][]string)
+		for _, c := range codeChunks {
+			name := c.Name
+			if name == "" {
+				name = fmt.Sprintf("line %d", c.StartLine)
+			}
+			fileSet[c.FilePath] = append(fileSet[c.FilePath], name)
+		}
+		for path, names := range fileSet {
+			summaryBuilder.WriteString(fmt.Sprintf("  • %s\n", path))
+			for _, n := range names {
+				summaryBuilder.WriteString(fmt.Sprintf("      - %s\n", n))
+			}
+		}
+	}
+
+	sm.logger.Info("استعلام سياق المشروع",
+		zap.String("query", query),
+		zap.Int("results", len(codeChunks)),
+	)
+
+	return &thinking.CodeContextResult{
+		Query:      query,
+		Chunks:     codeChunks,
+		Summary:    summaryBuilder.String(),
+		TotalFound: len(codeChunks),
+	}, nil
+}
+
+// detectProjectRoot يكتشف مسار المشروع بالبحث عن go.mod
+func (sm *SessionManager) detectProjectRoot() string {
+	// محاولة استخدام المسار المحفوظ أو البحث عن go.mod
+	searchPaths := []string{
+		".",
+		"..",
+		"../..",
+	}
+	for _, p := range searchPaths {
+		if _, err := os.Stat(filepath.Join(p, "go.mod")); err == nil {
+			abs, _ := filepath.Abs(p)
+			return abs
+		}
+	}
+	// Fallback: مسار التنفيذ الحالي
+	wd, _ := os.Getwd()
+	return wd
 }
 
 // recommendStrategy يوصي بالاستراتيجية

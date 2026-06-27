@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/MortalArena/Musketeers/pkg/agent/tools"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -121,6 +122,21 @@ func TestIntegration_CompleteWorkflow(t *testing.T) {
 
 	if analysis == nil {
 		t.Fatal("Expected analysis, got nil")
+	}
+
+	// تسجيل الأدوات المطلوبة قبل التنفيذ
+	if ua.toolExecutor != nil {
+		registry := tools.NewToolRegistry()
+		for _, toolName := range []string{"analyze", "identify_tools", "execute"} {
+			registry.Register(tools.ToolDefinition{
+				Name:         toolName,
+				RequiredRole: tools.RoleAny,
+				Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+					return "ok", nil
+				},
+			})
+		}
+		ua.toolExecutor.SetRegistry(registry)
 	}
 
 	// تخطيط مهمة

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MortalArena/Musketeers/pkg/agent"
 	"github.com/MortalArena/Musketeers/pkg/agent/automation"
 	"github.com/MortalArena/Musketeers/pkg/agent/direction"
 	"github.com/MortalArena/Musketeers/pkg/agent/integration"
@@ -90,6 +91,9 @@ type UnifiedAgent struct {
 	// SessionManager for session management
 	sessionManager *SessionManager
 
+	// [NEW] AgentPool يدير جميع الوكلاء في الجلسة — كل وكيل له ThinkingEngine + أدواته
+	agentPool *AgentPool
+
 	// Metrics for performance monitoring
 	metrics *metrics.Metrics
 
@@ -147,8 +151,9 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 	// إنشاء مجدول المهام
 	ua.taskScheduler = NewTaskScheduler(sessionID, logger)
 
-	// إنشاء SessionManager للتكامل الكامل
+	// إنشاء SessionManager للتكامل الكامل ومشاركة EventBus الموحد
 	ua.sessionManager = NewSessionManager(sessionID, logger)
+	ua.sessionManager.SetEventBus(ua.sessionEventBus) // [FIXED] مشاركة EventBus لمنع فقدان الأحداث
 
 	// إنشاء ProviderRegistry و Router
 	ua.providerRegistry = providers.NewProviderRegistry()
@@ -160,6 +165,11 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 	// إنشاء ThinkingEngine للتفكير العميق
 	ua.thinkingEngine = thinking.NewThinkingEngine(sessionID, agentID, logger)
 	ua.thinkingEngineInitialized = true
+
+	// إنشاء AgentPool — مع ToolRegistry null مؤقتاً (سيتم ضبطه لاحقاً من SessionContainer)
+	poolConfig := DefaultAgentPoolConfig()
+	ua.agentPool = NewAgentPool(sessionID, poolConfig, nil, logger)
+	ua.sessionManager.SetAgentPool(ua.agentPool)
 
 	// إنشاء WiringLayer للربط التلقائي للـ Adapters
 	ua.wiringLayer = wiring.NewWiringLayer(sessionID, agentID, logger)
@@ -255,6 +265,19 @@ func (ua *UnifiedAgent) Initialize(ctx context.Context) error {
 	if err := ua.connectThinkingEngineToSession(ctx); err != nil {
 		ua.logger.Warn("فشل ربط ThinkingEngine بمكونات session", zap.Error(err))
 		// لا نرجع خطأ لأن هذا ليس حرجاً للتهيئة
+	}
+
+	// تهيئة AgentPool — للوكلاء الخارجيين (adapters) الذين سيسجلون لاحقاً
+	if ua.agentPool != nil {
+		if ua.sessionContainer != nil {
+			ua.agentPool.SetSessionContainer(ua.sessionContainer)
+			if ua.sessionContainer.ToolRegistry != nil {
+				ua.agentPool.SetToolRegistry(ua.sessionContainer.ToolRegistry)
+			}
+		}
+		// بدء AutoParkWorker لتعطيل الوكلاء الخاملين
+		ua.agentPool.AutoParkWorker(ctx)
+		ua.logger.Info("تم تهيئة AgentPool للجلسة", zap.Int("max_agents", DefaultAgentPoolConfig().MaxAgents))
 	}
 
 	ua.logger.Info("تم تهيئة الوكيل الموحد بنجاح",
@@ -808,6 +831,46 @@ func (ua *UnifiedAgent) SetToolExecutor(executor *tools.ToolExecutor) {
 
 	ua.toolExecutor = executor
 	ua.logger.Info("Tool executor set")
+}
+
+// RegisterAgentToPool يسجل وكيل (adapter) في AgentPool ويعطيه صلاحياته
+// هذا هو المدخل الرئيسي لتسجيل وكلاء جدد (CLI, API, IDE, Browser, custom)
+func (ua *UnifiedAgent) RegisterAgentToPool(adapter agent.UnifiedAgent, role string) error {
+	ua.mu.Lock()
+	defer ua.mu.Unlock()
+
+	if ua.agentPool == nil {
+		return fmt.Errorf("AgentPool not initialized yet")
+	}
+
+	// تحويل role string إلى tools.AgentRole
+	agentRole := tools.AgentRole(role)
+	if agentRole == "" {
+		agentRole = tools.RoleRegular
+	}
+
+	instance, err := ua.agentPool.RegisterAgent(adapter, agentRole)
+	if err != nil {
+		return fmt.Errorf("فشل تسجيل الوكيل في AgentPool: %w", err)
+	}
+
+	// ربط الـ ThinkingEngine الجديد بمكونات الجلسة
+	if ua.sessionContainer != nil {
+		_ = ua.agentPool.ConnectThinkingEngineToSession(instance.AgentID)
+	}
+
+	ua.logger.Info("تم تسجيل وكيل في AgentPool",
+		zap.String("agent_id", instance.AgentID),
+		zap.String("type", instance.AgentType))
+
+	return nil
+}
+
+// GetAgentPool يعيد مرجع AgentPool (للاستخدام من main.go)
+func (ua *UnifiedAgent) GetAgentPool() *AgentPool {
+	ua.mu.RLock()
+	defer ua.mu.RUnlock()
+	return ua.agentPool
 }
 
 // SetRealSessionContainer يضبط SessionContainer الحقيقي (من main.go) لاستخدامه بدلاً من إنشاء واحد جديد

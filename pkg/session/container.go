@@ -75,6 +75,10 @@ type SessionContainer struct {
 
 	// [NEW] التحقق من قدرات الوكلاء
 	CapabilityVerifier *AgentCapabilityVerifier // [WHY] يتحقق من القدرات المعلنة للوكلاء
+
+	// [NEW] Context Reranker — فهرسة وبحث سياقي ذكي (مثل Cursor @)
+	// [FIX] مخزن كـ interface{} لتجنب دوائر الاستيراد مع pkg/agent/thinking
+	ContextReranker interface{} `json:"-"` // [WHY] فهرسة جميع ملفات المشروع والبحث الذكي
 }
 
 // [WHY] UnifiedSessionState الحالة الموحدة للجلسة
@@ -430,10 +434,18 @@ func (s *SessionContainer) FlushNow() error {
 }
 
 // Load يحمل الجلسة من BadgerDB
-func (s *SessionContainer) Load(id string) error {
+// [SAFETY] بعد فك التسلسل، يعيد تهيئة EventBus و DB (لأنهما json:"-")
+func (s *SessionContainer) Load(id string, db *badger.DB, eb *eventbus.EventBus) error {
+	if db == nil {
+		return fmt.Errorf("DB cannot be nil")
+	}
+	if eb == nil {
+		return fmt.Errorf("EventBus cannot be nil")
+	}
+
 	key := fmt.Sprintf("session:%s", id)
 
-	return s.DB.View(func(txn *badger.Txn) error {
+	err := db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(key))
 		if err != nil {
 			return err
@@ -443,6 +455,83 @@ func (s *SessionContainer) Load(id string) error {
 			return json.Unmarshal(val, s)
 		})
 	})
+	if err != nil {
+		return err
+	}
+
+	// [FIX] إعادة تهيئة الحقول غير القابلة للتسلسل
+	s.DB = db
+	s.EventBus = eb
+
+	// [FIX] إعادة تهيئة المراجع الداخلية إذا كانت nil بعد Load
+	if s.Memory == nil {
+		s.Memory = NewCollectiveMemory(s.ID, db)
+	}
+	if s.Skills == nil {
+		s.Skills = NewSkillsManager(s.ID)
+	}
+	if s.Workflow == nil {
+		s.Workflow = NewWorkflowEngine(s.ID)
+	}
+	if s.Artifacts == nil {
+		s.Artifacts = NewArtifactsStore(s.ID, db)
+	}
+	if s.Tasks == nil {
+		s.Tasks = NewTaskManager(s.ID)
+	}
+	if s.Progress == nil {
+		s.Progress = NewProgressTracker(s.ID)
+	}
+	if s.Handoff == nil {
+		s.Handoff = NewHandoffManager(s.ID, "")
+	}
+	if s.Aggregator == nil {
+		s.Aggregator = NewAggregator(s.ID)
+	}
+	if s.Reviewer == nil {
+		s.Reviewer = NewFinalReviewer()
+	}
+	if s.ChatManager == nil {
+		s.ChatManager = NewChatManager(s.ID, eb)
+	}
+	if s.Journal == nil {
+		s.Journal = NewSessionJournal(s.ID)
+	}
+	if s.ToolRegistry == nil {
+		s.ToolRegistry = tools.NewToolRegistry()
+		RegisterSessionTools(s.ToolRegistry, s)
+	}
+	if s.CapabilityVerifier == nil {
+		s.CapabilityVerifier = NewAgentCapabilityVerifier()
+	}
+	if s.ContextReranker == nil {
+		// [FIX] إعادة تهيئة ContextReranker بعد Load — يستخدم zap.NewNop() مؤقتاً
+		s.InitContextReranker(zap.NewNop())
+	}
+	if s.ctx == nil {
+		s.ctx = context.Background()
+		// [FIX] إعادة إنشاء cancelFunc مع context الجديد — يمنع nil pointer في Stop()
+		s.ctx, s.cancelFunc = context.WithCancel(s.ctx)
+	}
+	if s.cancelFunc == nil {
+		// [FIX] حتى لو ctx كان موجوداً، ننشئ cancelFunc إذا كانت nil
+		s.ctx, s.cancelFunc = context.WithCancel(context.Background())
+	}
+	if s.flushTicker == nil {
+		// [FIX] إعادة إنشاء flushTicker — يمنع nil pointer في StopFlushWorker()
+		s.flushTicker = time.NewTicker(30 * time.Second)
+	}
+	if s.flushDone == nil {
+		s.flushDone = make(chan struct{})
+	}
+	if s.state.Agents == nil {
+		s.state.Agents = make([]AgentInfo, 0)
+	}
+	if s.state.Tasks == nil {
+		s.state.Tasks = make([]TaskInfo, 0)
+	}
+
+	return nil
 }
 
 // Stop يوقف الجلسة
@@ -1027,9 +1116,16 @@ func (s *SessionContainer) Export() (*SessionExportData, error) {
 
 // Import يحمّل بيانات جلسة من تصدير سابق
 // [SAFETY] يتحقق من صحة البيانات وتطابق session ID
-func (s *SessionContainer) Import(data *SessionExportData) error {
+// [FIX] يستعيد الحقول غير القابلة للتسلسل (EventBus, DB)
+func (s *SessionContainer) Import(data *SessionExportData, db *badger.DB, eb *eventbus.EventBus) error {
 	if data == nil || data.SessionContainer == nil {
 		return fmt.Errorf("بيانات التصدير فارغة")
+	}
+	if db == nil {
+		return fmt.Errorf("DB cannot be nil")
+	}
+	if eb == nil {
+		return fmt.Errorf("EventBus cannot be nil")
 	}
 
 	s.mu.Lock()
@@ -1043,6 +1139,11 @@ func (s *SessionContainer) Import(data *SessionExportData) error {
 	// [SAFETY] التحقق من صحة OwnerDID
 	if data.SessionContainer.OwnerDID == "" {
 		return fmt.Errorf("معرف المالك فارغ في بيانات التصدير")
+	}
+
+	// [SAFETY] التحقق من تطابق معرف الجلسة قبل أي تحقق آخر من الحالة
+	if s.ID != "" && s.ID != data.SessionContainer.ID {
+		return fmt.Errorf("لا يمكن استيراد جلسة بمعرف مختلف: %s ≠ %s", data.SessionContainer.ID, s.ID)
 	}
 
 	// [SAFETY] التحقق من صحة الحالة
@@ -1061,8 +1162,6 @@ func (s *SessionContainer) Import(data *SessionExportData) error {
 	// نسخ بيانات الجلسة المستوردة
 	if s.ID == "" {
 		s.ID = data.SessionContainer.ID
-	} else if s.ID != data.SessionContainer.ID {
-		return fmt.Errorf("لا يمكن استيراد جلسة بمعرف مختلف: %s ≠ %s", data.SessionContainer.ID, s.ID)
 	}
 
 	s.Name = data.SessionContainer.Name
@@ -1071,6 +1170,10 @@ func (s *SessionContainer) Import(data *SessionExportData) error {
 	s.Status = data.SessionContainer.Status
 	s.Version = data.SessionContainer.Version
 	s.UpdatedAt = time.Now()
+
+	// [FIX] استعادة الحقول غير القابلة للتسلسل
+	s.DB = db
+	s.EventBus = eb
 
 	// استيراد الحالة الموحدة
 	s.stateMu.Lock()
@@ -1087,14 +1190,116 @@ func (s *SessionContainer) Import(data *SessionExportData) error {
 	s.stateMu.Unlock()
 
 	// استيراد سجل الأحداث
-	if len(data.JournalEntries) > 0 && s.Journal != nil {
+	if len(data.JournalEntries) > 0 {
+		if s.Journal == nil {
+			s.Journal = NewSessionJournal(s.ID)
+		}
 		s.Journal.Import(data.JournalEntries)
-		s.Journal.Append(JournalImported, data.ExporterDID, "human", "تم استيراد الجلسة من جهاز آخر", map[string]interface{}{
-			"exported_at": data.ExportedAt,
-		})
+		if data.ExporterDID != "" {
+			s.Journal.Append(JournalImported, data.ExporterDID, "human", "تم استيراد الجلسة من جهاز آخر", map[string]interface{}{
+				"exported_at": data.ExportedAt,
+			})
+		}
+	}
+
+	// [FIX] إعادة تهيئة المكونات المفقودة بعد الاستيراد
+	if s.Memory == nil {
+		s.Memory = NewCollectiveMemory(s.ID, db)
+	}
+	if s.Skills == nil {
+		s.Skills = NewSkillsManager(s.ID)
+	}
+	if s.Workflow == nil {
+		s.Workflow = NewWorkflowEngine(s.ID)
+	}
+	if s.Artifacts == nil {
+		s.Artifacts = NewArtifactsStore(s.ID, db)
+	}
+	if s.Tasks == nil {
+		s.Tasks = NewTaskManager(s.ID)
+	}
+	if s.Progress == nil {
+		s.Progress = NewProgressTracker(s.ID)
+	}
+	if s.Handoff == nil {
+		s.Handoff = NewHandoffManager(s.ID, "")
+	}
+	if s.Aggregator == nil {
+		s.Aggregator = NewAggregator(s.ID)
+	}
+	if s.Reviewer == nil {
+		s.Reviewer = NewFinalReviewer()
+	}
+	if s.ChatManager == nil {
+		s.ChatManager = NewChatManager(s.ID, eb)
+	}
+	if s.ToolRegistry == nil {
+		s.ToolRegistry = tools.NewToolRegistry()
+		RegisterSessionTools(s.ToolRegistry, s)
+	}
+	if s.CapabilityVerifier == nil {
+		s.CapabilityVerifier = NewAgentCapabilityVerifier()
+	}
+	if s.ContextReranker == nil {
+		// [FIX] إعادة تهيئة ContextReranker بعد Import
+		s.InitContextReranker(zap.NewNop())
+	}
+	if s.ctx == nil {
+		s.ctx = context.Background()
+		// [FIX] إعادة إنشاء cancelFunc يمنع nil pointer في Stop()
+		s.ctx, s.cancelFunc = context.WithCancel(s.ctx)
+	}
+	if s.cancelFunc == nil {
+		s.ctx, s.cancelFunc = context.WithCancel(context.Background())
+	}
+	if s.flushTicker == nil {
+		s.flushTicker = time.NewTicker(30 * time.Second)
+	}
+	if s.flushDone == nil {
+		s.flushDone = make(chan struct{})
 	}
 
 	return nil
+}
+
+// InitContextReranker يهيئ محرك البحث السياقي — يُستدعى بعد إنشاء الحاوية
+func (s *SessionContainer) InitContextReranker(logger *zap.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.ContextReranker != nil {
+		return
+	}
+
+	projectRoot := "."
+	// البحث عن go.mod لتحديد جذر المشروع
+	candidates := []string{".", "..", "../..", "../../..", "../../../.."}
+	for _, p := range candidates {
+		fullPath := filepath.Join(p, "go.mod")
+		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+			abs, _ := filepath.Abs(p)
+			projectRoot = abs
+			break
+		}
+	}
+	// إذا لم نجد go.mod، استخدم SessionFolder
+	if projectRoot == "." && s.Name != "" {
+		projectRoot = filepath.Join(".", "sessions", s.ID)
+	}
+
+	s.ContextReranker = thinking.NewContextReranker(projectRoot, logger)
+	s.ContextReranker.SetIndexPath(filepath.Join(projectRoot, ".musketeers", "code_index.json"))
+	logger.Info("تم تهيئة Context Reranker للجلسة",
+		zap.String("session_id", s.ID),
+		zap.String("project_root", projectRoot))
+}
+
+// GetContextReranker يرجع ContextReranker — يهيئه تلقائياً إذا لم يكن موجوداً
+func (s *SessionContainer) GetContextReranker(logger *zap.Logger) *thinking.ContextReranker {
+	if s.ContextReranker == nil {
+		s.InitContextReranker(logger)
+	}
+	return s.ContextReranker
 }
 
 // ToJSON يحول بيانات التصدير إلى JSON
