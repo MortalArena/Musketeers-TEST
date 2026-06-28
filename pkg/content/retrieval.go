@@ -56,6 +56,11 @@ func (f *Fetcher) FetchContent(ctx context.Context, cid string, did string) ([]b
 	for _, pid := range providers {
 		wg.Add(1)
 		go func(p peer.ID) {
+			defer func() {
+				if r := recover(); r != nil {
+					f.log.WithField("panic", r).Error("content retrieval worker panicked")
+				}
+			}()
 			defer wg.Done()
 			data, err := RequestBlock(ctx, f.host, p, cid)
 			resultCh <- result{data: data, err: err}
@@ -63,6 +68,11 @@ func (f *Fetcher) FetchContent(ctx context.Context, cid string, did string) ([]b
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				f.log.WithField("panic", r).Error("content retrieval closer panicked")
+			}
+		}()
 		wg.Wait()
 		close(resultCh)
 	}()

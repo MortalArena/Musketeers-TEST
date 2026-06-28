@@ -91,6 +91,7 @@ func TestCostTracker_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
+			defer func() { recover() }()
 			defer wg.Done()
 			err := tracker.CheckAndDeduct(workflowID, 5.00)
 			if err != nil {

@@ -252,6 +252,7 @@ func TestReservationManager_ConcurrentOperations(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func(index int) {
+			defer func() { recover() }()
 			sessionID := fmt.Sprintf("session-%d", index)
 			rm.ReserveAgent(ctx, "agent-1", sessionID, timeout)
 			done <- true

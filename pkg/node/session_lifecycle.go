@@ -406,7 +406,14 @@ func (lm *SessionLifecycleManager) detectStaleParticipants() {
 		}).Warn("مشارك غير متصل — تجاوز مهلة ضربات القلب")
 
 		if lm.callbacks.OnLeave != nil {
-			go lm.callbacks.OnLeave(nodeID)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						lm.log.WithField("panic", r).Error("OnLeave callback panicked")
+					}
+				}()
+				lm.callbacks.OnLeave(nodeID)
+			}()
 		}
 
 		lm.localBus.Publish(eventbus.Event{
@@ -420,7 +427,14 @@ func (lm *SessionLifecycleManager) detectStaleParticipants() {
 	// إذا كان المدير غير متصل → ابدأ الانتخاب
 	if lm.managerNode != "" {
 		if p, exists := lm.participants[lm.managerNode]; exists && !p.IsOnline {
-			go lm.startElection()
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						lm.log.WithField("panic", r).Error("startElection panicked")
+					}
+				}()
+				lm.startElection()
+			}()
 		}
 	}
 }
@@ -475,13 +489,17 @@ func (lm *SessionLifecycleManager) startElection() {
 		"delay":      delay,
 	}).Info("انتظار قبل الترشح للانتخاب")
 
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
 	select {
 	case <-lm.ctx.Done():
+		timer.Stop()
 		lm.electionMu.Lock()
 		lm.inElection = false
 		lm.electionMu.Unlock()
 		return
-	case <-time.After(delay):
+	case <-timer.C:
 	}
 
 	// التحقق: هل انتهى الانتخاب بالفعل (مدير جديد أُعلن)؟
@@ -508,10 +526,13 @@ func (lm *SessionLifecycleManager) startElection() {
 func (lm *SessionLifecycleManager) waitForElectionResult() {
 	// انتظر حتى deadline الانتخاب
 	deadline := time.Now().Add(electionWaitTime)
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+
 	select {
 	case <-lm.ctx.Done():
 		return
-	case <-time.After(time.Until(deadline)):
+	case <-timer.C:
 	}
 
 	lm.electionMu.Lock()
@@ -529,7 +550,14 @@ func (lm *SessionLifecycleManager) waitForElectionResult() {
 	lm.electionMu.Unlock()
 
 	if lm.callbacks.OnElectionComplete != nil {
-		go lm.callbacks.OnElectionComplete(candidates)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					lm.log.WithField("panic", r).Error("OnElectionComplete callback panicked")
+				}
+			}()
+			lm.callbacks.OnElectionComplete(candidates)
+		}()
 	}
 
 	lm.log.WithFields(logrus.Fields{
@@ -558,7 +586,14 @@ func (lm *SessionLifecycleManager) announceAsNewManager(delegationToken string) 
 	if lm.hbTicker == nil {
 		lm.hbTicker = time.NewTicker(heartbeatInterval)
 		lm.wg.Add(1)
-		go lm.sendHeartbeats()
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					lm.log.WithField("panic", r).Error("sendHeartbeats panicked")
+				}
+			}()
+			lm.sendHeartbeats()
+		}()
 	}
 
 	lm.log.WithField("session_id", lm.sessionID).Warn("أصبحت مدير الجلسة الجديد")
@@ -644,7 +679,7 @@ func (lm *SessionLifecycleManager) RequestStateSnapshot(ctx context.Context) ([]
 	// انتظار الرد (في التطبيق الحقيقي، هذا يحتاج قناة رد)
 	// هنا نستخدم callback OnStateReceived
 	lm.log.WithField("session_id", lm.sessionID).Info("طلب لقطة حالة")
-	return nil, nil
+	return nil, fmt.Errorf("state snapshot response not implemented: missing response channel")
 }
 
 // ReassignTasks يعيد توزيع مهام الوكيل المنقطع
@@ -723,7 +758,14 @@ func (lm *SessionLifecycleManager) handleCtrlMessage(msg SessionCtrlMsg) {
 
 		// مشارك جديد — إعلام
 		if lm.callbacks.OnJoin != nil {
-			go lm.callbacks.OnJoin(*lm.participants[msg.NodeID], nil)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						lm.log.WithField("panic", r).Error("OnJoin callback panicked")
+					}
+				}()
+				lm.callbacks.OnJoin(*lm.participants[msg.NodeID], nil)
+			}()
 		}
 	}
 	lm.mu.Unlock()
@@ -747,7 +789,14 @@ func (lm *SessionLifecycleManager) handleCtrlMessage(msg SessionCtrlMsg) {
 		}
 		lm.mu.Unlock()
 		if lm.callbacks.OnLeave != nil {
-			go lm.callbacks.OnLeave(msg.NodeID)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						lm.log.WithField("panic", r).Error("OnLeave callback panicked")
+					}
+				}()
+				lm.callbacks.OnLeave(msg.NodeID)
+			}()
 		}
 
 	case CtrlElectStart:
@@ -776,7 +825,14 @@ func (lm *SessionLifecycleManager) handleCtrlMessage(msg SessionCtrlMsg) {
 		}
 		lm.mu.Unlock()
 		if lm.callbacks.OnNewManager != nil {
-			go lm.callbacks.OnNewManager(msg.NodeID)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						lm.log.WithField("panic", r).Error("OnNewManager callback panicked")
+					}
+				}()
+				lm.callbacks.OnNewManager(msg.NodeID)
+			}()
 		}
 
 	case CtrlStateSnapshot:

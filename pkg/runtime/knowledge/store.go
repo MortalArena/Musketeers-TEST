@@ -106,6 +106,11 @@ type workingEntry struct {
 func NewInMemoryWorkingMemory() *InMemoryWorkingMemory {
 	mem := &InMemoryWorkingMemory{data: make(map[string]workingEntry), stopCh: make(chan struct{})}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		for {

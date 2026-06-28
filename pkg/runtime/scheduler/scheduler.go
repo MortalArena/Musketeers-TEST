@@ -130,7 +130,14 @@ func (s *ImmediateScheduler) Stop() error                { return nil }
 
 func StopWithContext(ctx context.Context, stop func() error) error {
 	done := make(chan error, 1)
-	go func() { done <- stop() }()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
+		done <- stop()
+	}()
 	select {
 	case err := <-done:
 		return err

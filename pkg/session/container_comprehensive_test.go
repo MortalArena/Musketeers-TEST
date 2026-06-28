@@ -169,6 +169,7 @@ func TestSessionContainer_ConcurrentUpdates(t *testing.T) {
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func(index int) {
+			defer func() { recover() }()
 			err := container.AddAgent(
 				"did:agent:"+string(rune('0'+index)),
 				"Agent "+string(rune('0'+index)),

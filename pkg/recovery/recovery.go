@@ -31,13 +31,21 @@ func (m *Manager) AddHandler(h Handler) {
 
 func (m *Manager) Execute(ctx context.Context, fn func(context.Context) error) error {
 	var lastErr error
+
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	if !timer.Stop() {
+		<-timer.C
+	}
+
 	for i := 0; i <= m.maxRetries; i++ {
 		if i > 0 {
 			delay := m.baseDelay * time.Duration(1<<(i-1))
+			timer.Reset(delay)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(delay):
+			case <-timer.C:
 			}
 		}
 		if err := fn(ctx); err != nil {

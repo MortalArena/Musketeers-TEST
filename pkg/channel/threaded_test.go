@@ -198,6 +198,7 @@ func TestThreadedChat_MultipleSubscribers(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func(i int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			tc.SubscribeToNodeThread(ctx, "workflow_123", "node_456", func(msg ThreadMessage) {
 				mu.Lock()
@@ -284,6 +285,7 @@ func TestThreadedChat_ConcurrentMessages(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(i int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			content := fmt.Sprintf("Message %d", i)
 			tc.SendMessageToNode(ctx, "workflow_123", "node_456", "did:mskt:user1", content)

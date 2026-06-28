@@ -69,6 +69,8 @@ type A2AAgent struct {
 
 // A2ASession يمثل جلسة تعاون بين الوكلاء
 type A2ASession struct {
+	mu sync.Mutex
+
 	ID           string                 `json:"id"`
 	TaskID       string                 `json:"task_id"`
 	Goal         string                 `json:"goal"`

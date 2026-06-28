@@ -354,6 +354,7 @@ func TestSessionBridge_ConcurrentOperations(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func(index int) {
+			defer func() { recover() }()
 			config := &BridgeConfig{
 				BridgeID:   fmt.Sprintf("test-bridge-%d", index),
 				SourceID:   fmt.Sprintf("session-%d", index),

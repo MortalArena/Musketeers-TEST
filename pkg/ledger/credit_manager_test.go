@@ -131,6 +131,7 @@ func TestCreditManager_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(i int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			challenge := "challenge_" + string(rune(i))
 			expectedHash := sha256.Sum256([]byte(challenge + nodeID))

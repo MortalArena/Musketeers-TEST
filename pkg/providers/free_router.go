@@ -150,13 +150,16 @@ func (r *FreeRouter) executeWithRetry(ctx context.Context, provider Provider, re
 		}
 
 		// Set timeout if configured
+		execCtx := ctx
+		var cancel context.CancelFunc
 		if r.config.Timeout > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, r.config.Timeout)
-			cancel()
+			execCtx, cancel = context.WithTimeout(ctx, r.config.Timeout)
 		}
 
-		resp, err := provider.Complete(ctx, req)
+		resp, err := provider.Complete(execCtx, req)
+		if cancel != nil {
+			cancel()
+		}
 		if err == nil {
 			// Record successful usage
 			if r.tracker != nil {
@@ -194,13 +197,16 @@ func (r *FreeRouter) executeStreamWithRetry(ctx context.Context, provider Provid
 		}
 
 		// Set timeout if configured
+		execCtx := ctx
+		var cancel context.CancelFunc
 		if r.config.Timeout > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, r.config.Timeout)
-			defer cancel()
+			execCtx, cancel = context.WithTimeout(ctx, r.config.Timeout)
 		}
 
-		err := provider.StreamComplete(ctx, req, callback)
+		err := provider.StreamComplete(execCtx, req, callback)
+		if cancel != nil {
+			cancel()
+		}
 		if err == nil {
 			// Record successful usage (streaming doesn't provide token count)
 			if r.tracker != nil {

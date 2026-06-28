@@ -157,7 +157,14 @@ func (s *Server) acceptConnections() {
 				continue
 			}
 
-			go s.handleConnection(conn)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						s.log.WithField("panic", r).Error("connection handler panicked")
+					}
+				}()
+				s.handleConnection(conn)
+			}()
 		}
 	}
 }

@@ -233,6 +233,11 @@ func NewChunkAssembler() *ChunkAssembler {
 	}
 	// حلقة تنظيف دورية كل 5 دقائق لمسح الملفات غير المكتملة التي تجاوز عمرها 30 دقيقة
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for {

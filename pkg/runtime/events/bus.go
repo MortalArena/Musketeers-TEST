@@ -69,6 +69,11 @@ func (b *MemoryEventBus) Publish(event Event) error {
 		b.wg.Add(1)
 		go func(handler EventHandler) {
 			defer b.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("panic in event handler: %v\n", r)
+				}
+			}()
 			callHandler(handler, event)
 		}(entry.handler)
 	}
@@ -76,6 +81,11 @@ func (b *MemoryEventBus) Publish(event Event) error {
 		b.wg.Add(1)
 		go func(handler EventHandler) {
 			defer b.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("panic in wildcard event handler: %v\n", r)
+				}
+			}()
 			callHandler(handler, event)
 		}(entry.handler)
 	}

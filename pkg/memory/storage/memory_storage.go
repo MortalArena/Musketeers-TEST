@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -32,7 +33,7 @@ func (ms *MemoryStorage) Load(ctx context.Context, key string) ([]byte, error) {
 	defer ms.mu.RUnlock()
 	data, exists := ms.data[key]
 	if !exists {
-		return nil, nil
+		return nil, fmt.Errorf("key not found: %s", key)
 	}
 	return data, nil
 }

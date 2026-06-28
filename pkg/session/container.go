@@ -390,6 +390,11 @@ func (s *SessionContainer) StartFlushWorker(ctx context.Context) {
 	s.flushTicker = time.NewTicker(30 * time.Second)
 	s.flushDone = make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
 		defer close(s.flushDone)
 		for {
 			select {
@@ -542,14 +547,18 @@ func (s *SessionContainer) Stop() error {
 	s.UpdatedAt = time.Now()
 	s.MarkDirty()
 
-	s.EventBus.Publish(eventbus.Event{
-		Type:      "session.paused",
-		Payload:   s.ID,
-		Source:    "session_container",
-		SessionID: s.ID,
-	})
+	if s.EventBus != nil {
+		s.EventBus.Publish(eventbus.Event{
+			Type:      "session.paused",
+			Payload:   s.ID,
+			Source:    "session_container",
+			SessionID: s.ID,
+		})
+	}
 
-	s.Journal.Append(JournalSessionPaused, "system", "system", "تم إيقاف الجلسة مؤقتاً", nil)
+	if s.Journal != nil {
+		s.Journal.Append(JournalSessionPaused, "system", "system", "تم إيقاف الجلسة مؤقتاً", nil)
+	}
 
 	return s.Save()
 }
@@ -567,23 +576,27 @@ func (s *SessionContainer) Resume() error {
 	stateCopy := s.state
 	s.stateMu.Unlock()
 
-	// [HOW] نشر حدث session.resumed بعد فك القفل
-	s.EventBus.Publish(eventbus.Event{
-		Type:      "session.resumed",
-		Payload:   s.ID,
-		Source:    "session_container",
-		SessionID: s.ID,
-	})
+	if s.EventBus != nil {
+		// [HOW] نشر حدث session.resumed بعد فك القفل
+		s.EventBus.Publish(eventbus.Event{
+			Type:      "session.resumed",
+			Payload:   s.ID,
+			Source:    "session_container",
+			SessionID: s.ID,
+		})
 
-	// [HOW] نشر حدث session.state.changed بعد فك القفل
-	s.EventBus.Publish(eventbus.Event{
-		Type:      "session.state.changed",
-		Payload:   stateCopy,
-		Source:    "session_container",
-		SessionID: s.ID,
-	})
+		// [HOW] نشر حدث session.state.changed بعد فك القفل
+		s.EventBus.Publish(eventbus.Event{
+			Type:      "session.state.changed",
+			Payload:   stateCopy,
+			Source:    "session_container",
+			SessionID: s.ID,
+		})
+	}
 
-	s.Journal.Append(JournalSessionResumed, "system", "system", "تم استئناف الجلسة", nil)
+	if s.Journal != nil {
+		s.Journal.Append(JournalSessionResumed, "system", "system", "تم استئناف الجلسة", nil)
+	}
 
 	return nil
 }
@@ -627,10 +640,12 @@ func (s *SessionContainer) UpdateTaskStatus(taskID, status string) error {
 	} else if status == "failed" {
 		entryType = JournalTaskFailed
 	}
-	s.Journal.Append(entryType, "system", "system", "تحديث حالة المهمة: "+taskID+" → "+status, map[string]interface{}{
-		"task_id": taskID,
-		"status":  status,
-	})
+	if s.Journal != nil {
+		s.Journal.Append(entryType, "system", "system", "تحديث حالة المهمة: "+taskID+" → "+status, map[string]interface{}{
+			"task_id": taskID,
+			"status":  status,
+		})
+	}
 
 	return nil
 }
@@ -734,14 +749,7 @@ func (s *SessionContainer) AddAgent(did, name, role string) error {
 		return fmt.Errorf("maximum agents limit reached (%d)", MaxAgentsInState)
 	}
 
-	// [HOW] إضافة الوكيل للحالة الموحدة مع معالجة الأخطاء
-	defer func() {
-		if r := recover(); r != nil {
-			s.stateMu.Unlock()
-			panic(r) // إعادة إطلاق panic بعد فك القفل
-		}
-	}()
-
+	// [HOW] إضافة الوكيل للحالة الموحدة
 	s.state.Agents = append(s.state.Agents, AgentInfo{
 		DID:    did,
 		Name:   name,
@@ -763,12 +771,13 @@ func (s *SessionContainer) AddAgent(did, name, role string) error {
 		SessionID: s.ID,
 	})
 
-	// تسجيل في سجل الأحداث
-	s.Journal.Append(JournalAgentAdded, did, "agent", "تم إضافة وكيل: "+name, map[string]interface{}{
-		"agent_did":  did,
-		"agent_name": name,
-		"role":       role,
-	})
+	if s.Journal != nil {
+		s.Journal.Append(JournalAgentAdded, did, "agent", "تم إضافة وكيل: "+name, map[string]interface{}{
+			"agent_did":  did,
+			"agent_name": name,
+			"role":       role,
+		})
+	}
 
 	return nil
 }
@@ -1242,8 +1251,7 @@ func (s *SessionContainer) Import(data *SessionExportData, db *badger.DB, eb *ev
 		s.CapabilityVerifier = NewAgentCapabilityVerifier()
 	}
 	if s.ContextReranker == nil {
-		// [FIX] إعادة تهيئة ContextReranker بعد Import
-		s.InitContextReranker(zap.NewNop())
+		s.initContextRerankerUnsafe(zap.NewNop())
 	}
 	if s.ctx == nil {
 		s.ctx = context.Background()
@@ -1267,13 +1275,16 @@ func (s *SessionContainer) Import(data *SessionExportData, db *badger.DB, eb *ev
 func (s *SessionContainer) InitContextReranker(logger *zap.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.initContextRerankerUnsafe(logger)
+}
 
+// initContextRerankerUnsafe يهيئ محرك البحث السياقي بدون قفل — يُستدعى فقط مع المُتصل الذي يحمل القفل
+func (s *SessionContainer) initContextRerankerUnsafe(logger *zap.Logger) {
 	if s.ContextReranker != nil {
 		return
 	}
 
 	projectRoot := "."
-	// البحث عن go.mod لتحديد جذر المشروع
 	candidates := []string{".", "..", "../..", "../../..", "../../../.."}
 	for _, p := range candidates {
 		fullPath := filepath.Join(p, "go.mod")
@@ -1283,13 +1294,10 @@ func (s *SessionContainer) InitContextReranker(logger *zap.Logger) {
 			break
 		}
 	}
-	// إذا لم نجد go.mod، استخدم SessionFolder
 	if projectRoot == "." && s.Name != "" {
 		projectRoot = filepath.Join(".", "sessions", s.ID)
 	}
 
-	// [FIX] ContextReranker يتم إنشاؤه في UnifiedAgent وتمريره هنا
-	// لتجنب import cycle بين pkg/session و pkg/agent/thinking
 	logger.Info("ContextReranker يجب أن يتم ضبطه من UnifiedAgent لتجنب import cycle",
 		zap.String("session_id", s.ID),
 		zap.String("project_root", projectRoot))

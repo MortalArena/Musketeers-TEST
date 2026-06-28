@@ -131,6 +131,11 @@ func (bm *BootstrapManager) Bootstrap(ctx context.Context) error {
 	for _, peerAddr := range bm.peers {
 		wg.Add(1)
 		go func(addr string) {
+			defer func() {
+				if r := recover(); r != nil {
+					bm.logger.Error("bootstrap worker panicked", logrus.WithField("panic", r), logrus.WithField("addr", addr))
+				}
+			}()
 			defer wg.Done()
 
 			for retry := 0; retry < bm.maxRetries; retry++ {
@@ -154,6 +159,11 @@ func (bm *BootstrapManager) Bootstrap(ctx context.Context) error {
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				bm.logger.Error("bootstrap waiter panicked", logrus.WithField("panic", r))
+			}
+		}()
 		wg.Wait()
 		close(successChan)
 		close(errorChan)
@@ -209,6 +219,11 @@ func (bm *BootstrapManager) connectToPeer(ctx context.Context, addr string) (pee
 // StartPeriodicBootstrap يبدأ bootstrap الدوري
 func (bm *BootstrapManager) StartPeriodicBootstrap(ctx context.Context, interval time.Duration) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				bm.logger.Error("periodic bootstrap panicked", logrus.WithField("panic", r))
+			}
+		}()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 

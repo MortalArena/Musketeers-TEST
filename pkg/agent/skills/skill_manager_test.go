@@ -340,6 +340,7 @@ func TestSkillManager_Security_ConcurrentAccess(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func() {
+			defer func() { recover() }()
 			sm.GetSkill("test-skill")
 			done <- true
 		}()

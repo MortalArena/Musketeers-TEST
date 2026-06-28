@@ -27,11 +27,18 @@ func RetryWithBackoff(ctx context.Context, config RetryConfig, operation func() 
 	var lastErr error
 	delay := config.InitialDelay
 
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	if !timer.Stop() {
+		<-timer.C
+	}
+
 	for attempt := 0; attempt < config.MaxAttempts; attempt++ {
 		if attempt > 0 {
+			timer.Reset(delay)
 			// الانتظار قبل إعادة المحاولة
 			select {
-			case <-time.After(delay):
+			case <-timer.C:
 			case <-ctx.Done():
 				return ctx.Err()
 			}

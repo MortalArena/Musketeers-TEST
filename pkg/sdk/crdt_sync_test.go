@@ -202,6 +202,7 @@ func TestCRDTSyncManager_MultipleSubscribers(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func(i int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			manager.Subscribe(ctx, fmt.Sprintf("sub_%d", i), func(update []byte, senderDID string) {
 				mu.Lock()

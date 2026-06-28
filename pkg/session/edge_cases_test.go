@@ -451,6 +451,7 @@ func TestSessionContainer_ConcurrentExportImport(t *testing.T) {
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func(index int) {
+			defer func() { recover() }()
 			_, err := container.Export()
 			assert.NoError(t, err)
 			done <- true

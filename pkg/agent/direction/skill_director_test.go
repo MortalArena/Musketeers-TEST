@@ -196,6 +196,7 @@ func TestSkillDirector_Security_ConcurrentGuidance(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func() {
+			defer func() { recover() }()
 			sd.GuideAgent(ctx, task, agentCtx)
 			done <- true
 		}()

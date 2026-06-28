@@ -580,6 +580,11 @@ func (ap *AgentPool) countActive() int {
 // AutoParkWorker يبدأ عاملًا دوريًا لتعطيل الوكلاء الخاملين
 func (ap *AgentPool) AutoParkWorker(ctx context.Context) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ap.logger.Error("AutoParkWorker panicked", zap.Any("panic", r))
+			}
+		}()
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 

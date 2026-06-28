@@ -683,9 +683,21 @@ func (tm *TaskManager) Load(data []byte) error {
 	}
 
 	tm.runningTasks = loaded.RunningTasks
+	if tm.runningTasks == nil {
+		tm.runningTasks = make(map[string]*ManagedTask)
+	}
 	tm.completedTasks = loaded.CompletedTasks
+	if tm.completedTasks == nil {
+		tm.completedTasks = make(map[string]*ManagedTask)
+	}
 	tm.failedTasks = loaded.FailedTasks
+	if tm.failedTasks == nil {
+		tm.failedTasks = make(map[string]*ManagedTask)
+	}
 	tm.agentStates = loaded.AgentStates
+	if tm.agentStates == nil {
+		tm.agentStates = make(map[string]*AgentState)
+	}
 
 	return nil
 }

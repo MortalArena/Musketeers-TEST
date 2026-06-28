@@ -59,6 +59,11 @@ func (hs *HostingServer) Start() error {
 	if hs.config.EnableHTTP {
 		wg.Add(1)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					_ = r
+				}
+			}()
 			defer wg.Done()
 			if err := hs.startHTTP(); err != nil {
 				errors <- fmt.Errorf("HTTP server error: %w", err)
@@ -70,6 +75,11 @@ func (hs *HostingServer) Start() error {
 	if hs.config.EnableHTTPS {
 		wg.Add(1)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					_ = r
+				}
+			}()
 			defer wg.Done()
 			if err := hs.startHTTPS(); err != nil {
 				errors <- fmt.Errorf("HTTPS server error: %w", err)
@@ -79,6 +89,11 @@ func (hs *HostingServer) Start() error {
 
 	// انتظار بدء جميع الخوادم
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
 		wg.Wait()
 		close(errors)
 	}()

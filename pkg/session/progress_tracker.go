@@ -425,9 +425,11 @@ func (pt *ProgressTracker) handleTaskCompleted(e eventbus.Event) {
 	pt.completedTasks++
 
 	// إزالة المخاطر والتأخيرات للمهمة المكتملة
-	if taskID, ok := e.Payload.(map[string]interface{})["task_id"].(string); ok {
-		delete(pt.risks, taskID)
-		delete(pt.delays, taskID)
+	if payload, ok := e.Payload.(map[string]interface{}); ok {
+		if taskID, ok := payload["task_id"].(string); ok {
+			delete(pt.risks, taskID)
+			delete(pt.delays, taskID)
+		}
 	}
 }
 
@@ -438,8 +440,8 @@ func (pt *ProgressTracker) handleTaskFailed(e eventbus.Event) {
 
 	// تسجيل مخاطرة عالية للمهمة الفاشلة
 	if payload, ok := e.Payload.(map[string]interface{}); ok {
-		taskID := payload["task_id"].(string)
-		errorMsg := payload["error"].(string)
+		taskID, _ := payload["task_id"].(string)
+		errorMsg, _ := payload["error"].(string)
 		pt.recordRisk(taskID, "", RiskLevelCritical, fmt.Sprintf("Task failed: %s", errorMsg), nil)
 	}
 }
@@ -496,8 +498,17 @@ func (pt *ProgressTracker) Load(data []byte) error {
 	}
 
 	pt.progressMetrics = loaded.ProgressMetrics
+	if pt.progressMetrics == nil {
+		pt.progressMetrics = make(map[string][]ProgressMetric)
+	}
 	pt.delays = loaded.Delays
+	if pt.delays == nil {
+		pt.delays = make(map[string]DelayInfo)
+	}
 	pt.risks = loaded.Risks
+	if pt.risks == nil {
+		pt.risks = make(map[string]RiskInfo)
+	}
 	pt.totalTasks = loaded.TotalTasks
 	pt.completedTasks = loaded.CompletedTasks
 	pt.delayedTasks = loaded.DelayedTasks

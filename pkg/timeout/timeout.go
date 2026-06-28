@@ -115,6 +115,11 @@ func ExecuteWithTimeout(ctx context.Context, timeout time.Duration, fn func() er
 
 	errCh := make(chan error, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				errCh <- fmt.Errorf("panic: %v", r)
+			}
+		}()
 		errCh <- fn()
 	}()
 
@@ -138,6 +143,12 @@ func ExecuteWithTimeoutResult[T any](ctx context.Context, timeout time.Duration,
 	resultCh := make(chan result, 1)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				var zero T
+				resultCh <- result{value: zero, err: fmt.Errorf("panic: %v", r)}
+			}
+		}()
 		value, err := fn()
 		resultCh <- result{value: value, err: err}
 	}()
@@ -158,6 +169,11 @@ func ExecuteWithDeadline(ctx context.Context, deadline time.Time, fn func() erro
 
 	errCh := make(chan error, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				errCh <- fmt.Errorf("panic: %v", r)
+			}
+		}()
 		errCh <- fn()
 	}()
 
@@ -172,11 +188,18 @@ func ExecuteWithDeadline(ctx context.Context, deadline time.Time, fn func() erro
 // RetryWithTimeout retries a function with timeout between attempts
 func RetryWithTimeout(ctx context.Context, maxAttempts int, timeout time.Duration, fn func() error) error {
 	var lastErr error
-	
+
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	if !timer.Stop() {
+		<-timer.C
+	}
+
 	for i := 0; i < maxAttempts; i++ {
 		if i > 0 {
+			timer.Reset(timeout)
 			select {
-			case <-time.After(timeout):
+			case <-timer.C:
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -196,11 +219,18 @@ func RetryWithTimeout(ctx context.Context, maxAttempts int, timeout time.Duratio
 func RetryWithBackoff(ctx context.Context, maxAttempts int, initialBackoff time.Duration, fn func() error) error {
 	var lastErr error
 	backoff := initialBackoff
-	
+
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	if !timer.Stop() {
+		<-timer.C
+	}
+
 	for i := 0; i < maxAttempts; i++ {
 		if i > 0 {
+			timer.Reset(backoff)
 			select {
-			case <-time.After(backoff):
+			case <-timer.C:
 			case <-ctx.Done():
 				return ctx.Err()
 			}

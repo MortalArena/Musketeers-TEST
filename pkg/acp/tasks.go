@@ -130,7 +130,9 @@ func handleExecute(_ context.Context, input json.RawMessage) (json.RawMessage, e
 		var p struct {
 			Text string `json:"text"`
 		}
-		_ = json.Unmarshal(in.Params, &p)
+		if err := json.Unmarshal(in.Params, &p); err != nil {
+			return nil, fmt.Errorf("failed to parse params: %w", err)
+		}
 		h := sha256.Sum256([]byte(p.Text))
 		return json.Marshal(map[string]string{
 			"hash": hex.EncodeToString(h[:]),
@@ -139,13 +141,17 @@ func handleExecute(_ context.Context, input json.RawMessage) (json.RawMessage, e
 		var p struct {
 			Text string `json:"text"`
 		}
-		_ = json.Unmarshal(in.Params, &p)
+		if err := json.Unmarshal(in.Params, &p); err != nil {
+			return nil, fmt.Errorf("failed to parse params: %w", err)
+		}
 		return json.Marshal(map[string]string{"result": strings.ToUpper(p.Text)})
 	case "lower":
 		var p struct {
 			Text string `json:"text"`
 		}
-		_ = json.Unmarshal(in.Params, &p)
+		if err := json.Unmarshal(in.Params, &p); err != nil {
+			return nil, fmt.Errorf("failed to parse params: %w", err)
+		}
 		return json.Marshal(map[string]string{"result": strings.ToLower(p.Text)})
 	default:
 		return nil, fmt.Errorf("إجراء غير معروف")

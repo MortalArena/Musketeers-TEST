@@ -1,0 +1,33 @@
+﻿
+Key          Value
+---          -----
+agent           53
+eventbus        37
+providers       29
+crypto          16
+capability      12
+policy          10
+content          9
+node             6
+agent_bridge     6
+protocol         5
+runtime          4
+common           4
+channel          3
+acp              3
+session          3
+sdk              3
+vault            2
+registry         2
+orchestrator     2
+workflow         1
+mailbox          1
+backup           1
+identity         1
+analytics        1
+naming           1
+verification     1
+skills           1
+discovery        1
+
+

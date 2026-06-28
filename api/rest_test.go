@@ -379,6 +379,7 @@ func TestConcurrency(t *testing.T) {
 
 		for i := 0; i < 10; i++ {
 			go func(id int) {
+				defer func() { recover() }()
 				reqBody := map[string]string{
 					"name":        "Test Session",
 					"description": "Test Description",

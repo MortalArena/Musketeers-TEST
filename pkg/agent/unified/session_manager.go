@@ -533,9 +533,11 @@ func (sm *SessionManager) ExecuteTasks(ctx context.Context) error {
 
 // executeTaskConcurrently ينفذ مهمة بالتزامن — مع توجيه لـ ThinkingEngine الوكيل المحدد
 func (sm *SessionManager) executeTaskConcurrently(ctx context.Context, task *SessionTask) {
+	sm.mu.Lock()
 	task.Status = TaskStatusRunning
 	now := time.Now()
 	task.StartedAt = &now
+	sm.mu.Unlock()
 
 	sm.eventBus.BroadcastToAll(ctx, sm.sessionManagerAgent, TaskStarted, map[string]interface{}{
 		"task_id":     task.ID,
@@ -545,9 +547,11 @@ func (sm *SessionManager) executeTaskConcurrently(ctx context.Context, task *Ses
 
 	// [FIX] توجيه المهمة لـ ThinkingEngine الوكيل المحدد (وليس main agent فقط)
 	result, err := sm.routeTaskToAgent(ctx, task)
+	sm.mu.Lock()
 	if err != nil {
 		task.Status = TaskStatusFailed
 		task.Error = err
+		sm.mu.Unlock()
 
 		sm.eventBus.BroadcastToAll(ctx, sm.sessionManagerAgent, TaskFailed, map[string]interface{}{
 			"task_id":     task.ID,
@@ -562,6 +566,7 @@ func (sm *SessionManager) executeTaskConcurrently(ctx context.Context, task *Ses
 	task.Result = result
 	completedAt := time.Now()
 	task.CompletedAt = &completedAt
+	sm.mu.Unlock()
 
 	sm.eventBus.BroadcastToAll(ctx, sm.sessionManagerAgent, TaskCompleted, map[string]interface{}{
 		"task_id":     task.ID,

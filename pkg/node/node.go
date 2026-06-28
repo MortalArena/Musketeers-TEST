@@ -507,13 +507,17 @@ func (n *Node) SendDirectMessage(ctx context.Context, toDID string, content []by
 		return err
 	}
 
-	msgs, err := ChunkMessage(n.keyPair().DID, toDID, content, n.keyPair().Private, recipientPub)
+	pubKey, err := crypto.UnmarshalEd25519PublicKey(recipientPub)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to unmarshal recipient public key: %w", err)
 	}
-	_ = msgs
 
-	return fmt.Errorf("peer ID resolution required — use SendDirectToPeer after resolving via PublishSearch")
+	pid, err := peer.IDFromPublicKey(pubKey)
+	if err != nil {
+		return fmt.Errorf("failed to derive peer ID from public key: %w", err)
+	}
+
+	return n.SendDirectToPeer(ctx, pid, toDID, content)
 }
 
 // SendDirectToPeer يرسل رسالة مباشرة لـ peer محدد

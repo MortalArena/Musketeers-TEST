@@ -28,9 +28,11 @@ func TestWithDialTimeout(t *testing.T) {
 	ctx, cancel := WithDialTimeout(ctx, 5*time.Second)
 	defer cancel()
 	
+	timer := time.NewTimer(6 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-	case <-time.After(6 * time.Second):
+	case <-timer.C:
 		t.Error("Context should have timed out")
 	}
 }
@@ -40,9 +42,11 @@ func TestWithReadTimeout(t *testing.T) {
 	ctx, cancel := WithReadTimeout(ctx, 1*time.Second)
 	defer cancel()
 	
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-	case <-time.After(2 * time.Second):
+	case <-timer.C:
 		t.Error("Context should have timed out")
 	}
 }
@@ -52,9 +56,11 @@ func TestWithRequestTimeout(t *testing.T) {
 	ctx, cancel := WithRequestTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
 	
+	timer := time.NewTimer(200 * time.Millisecond)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-	case <-time.After(200 * time.Millisecond):
+	case <-timer.C:
 		t.Error("Context should have timed out")
 	}
 }

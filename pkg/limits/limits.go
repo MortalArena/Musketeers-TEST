@@ -146,6 +146,9 @@ func NewRateLimiter(maxTokens int32, refillRate int32, refillInterval time.Durat
 func (rl *RateLimiter) Acquire(ctx context.Context) error {
 	rl.refill()
 	
+	timer := time.NewTimer(rl.refillInterval)
+	defer timer.Stop()
+	
 	for {
 		rl.mu.Lock()
 		if rl.tokens > 0 {
@@ -156,8 +159,9 @@ func (rl *RateLimiter) Acquire(ctx context.Context) error {
 		rl.mu.Unlock()
 		
 		select {
-		case <-time.After(rl.refillInterval):
+		case <-timer.C:
 			rl.refill()
+			timer.Reset(rl.refillInterval)
 		case <-ctx.Done():
 			return ctx.Err()
 		}

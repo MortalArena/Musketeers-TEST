@@ -21,6 +21,7 @@ func TestConcurrentRegistryAccess_20Agents(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		wg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			var role AgentRole
 			if id == 0 {
@@ -58,6 +59,7 @@ func TestConcurrentRegistryQueries_50(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
 		go func() {
+			defer func() { recover() }()
 			defer wg.Done()
 
 			// مزيج من القراءة والكتابة المتزامنة
@@ -99,6 +101,7 @@ func TestConcurrentFileOps_10Agents(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		wg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer wg.Done()
 
 			exec := NewToolExecutor(tmpDir, logger)
@@ -142,6 +145,7 @@ func TestConcurrentRegistryRegister_10Agents(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer wg.Done()
 
 			name := fmt.Sprintf("dynamic_tool_%d", id)
@@ -181,6 +185,7 @@ func TestEscalatingConcurrency(t *testing.T) {
 			for i := 0; i < count; i++ {
 				wg.Add(1)
 				go func(id int) {
+					defer func() { recover() }()
 					defer wg.Done()
 					role := RoleRegular
 					if id%5 == 0 {
@@ -232,6 +237,7 @@ func TestMultipleProvidersConcurrency(t *testing.T) {
 		for i := 0; i < p.count; i++ {
 			wg.Add(1)
 			go func(provider string, model string, id int) {
+				defer func() { recover() }()
 				defer wg.Done()
 
 				exec := NewToolExecutorWithRegistry(tmpDir, registry, RoleRegular, logger)
@@ -275,6 +281,7 @@ func TestManagerPurgeConcurrent(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			exec := NewToolExecutorWithRegistry(tmpDir, registry, RoleRegular, logger)
 

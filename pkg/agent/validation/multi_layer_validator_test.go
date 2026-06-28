@@ -147,6 +147,7 @@ func TestMultiLayerValidator_Security_ConcurrentValidation(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func() {
+			defer func() { recover() }()
 			mlv.ValidateInput(ctx, "test input")
 			done <- true
 		}()

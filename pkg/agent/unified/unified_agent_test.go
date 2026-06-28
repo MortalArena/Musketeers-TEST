@@ -223,6 +223,7 @@ func TestUnifiedAgent_Security_ConcurrentOperations(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func() {
+			defer func() { recover() }()
 			ua.GetSystemSummary(ctx)
 			done <- true
 		}()

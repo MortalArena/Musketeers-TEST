@@ -504,6 +504,9 @@ func (hm *HandoffManager) Load(data []byte) error {
 	}
 
 	hm.handoffs = loaded.Handoffs
+	if hm.handoffs == nil {
+		hm.handoffs = make(map[string]*HandoffRequest)
+	}
 
 	return nil
 }

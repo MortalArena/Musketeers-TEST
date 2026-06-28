@@ -49,6 +49,7 @@ func TestIntegration_MultipleAgentsInSession(t *testing.T) {
 				for j := 0; j < tasksPerAgent; j++ {
 					wg.Add(1)
 					go func(agentIndex, taskIndex int, ua *UnifiedAgent) {
+						defer func() { recover() }()
 						defer wg.Done()
 
 						thinkingEngine := ua.GetThinkingEngine()

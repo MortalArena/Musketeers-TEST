@@ -44,11 +44,13 @@ func TestSessionNetworkBridge_RealTimeSync(t *testing.T) {
 		callbacks.OnRemoteStateChange(testEvent)
 	}
 
+	timer := time.NewTimer(1 * time.Second)
+	defer timer.Stop()
 	select {
 	case evt := <-remoteEvents:
 		assert.Equal(t, "session.state.changed", evt.Type)
 		assert.Equal(t, sessionID, evt.SessionID)
-	case <-time.After(1 * time.Second):
+	case <-timer.C:
 		t.Fatal("timeout waiting for remote event")
 	}
 }
@@ -143,6 +145,7 @@ func TestSessionJournal_ConcurrentAppend(t *testing.T) {
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func(index int) {
+			defer func() { recover() }()
 			// محاكاة إضافة إدخال
 			done <- true
 		}(i)

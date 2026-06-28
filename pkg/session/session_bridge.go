@@ -166,10 +166,10 @@ func (sb *SessionBridge) Start() error {
 // Stop يوقف الجسر
 func (sb *SessionBridge) Stop() error {
 	sb.mu.Lock()
-	defer sb.mu.Unlock()
-
 	sb.status = BridgeStatusClosed
 	sb.cancel()
+	sb.mu.Unlock()
+
 	sb.wg.Wait()
 
 	close(sb.sourceToTarget)
@@ -205,31 +205,35 @@ func (sb *SessionBridge) SendMessage(ctx context.Context, msg *BridgeMessage) er
 		return fmt.Errorf("message size too large (max %d bytes)", MaxBridgeMessageSize)
 	}
 
-	sb.mu.RLock()
-	defer sb.mu.RUnlock()
-
+	sb.mu.Lock()
 	if sb.status != BridgeStatusActive {
+		sb.mu.Unlock()
 		return fmt.Errorf("جسر غير نشط: %s", sb.status)
 	}
 
 	// [SAFETY] التحقق من الحد الأقصى لعدد الرسائل
 	if sb.messagesSent >= MaxBridgeMessages {
+		sb.mu.Unlock()
 		return fmt.Errorf("maximum messages limit reached (%d)", MaxBridgeMessages)
 	}
+
+	sb.messagesSent++
+	sb.bytesTransferred += int64(len(msg.Content))
+	sb.lastActivity = time.Now()
+	sb.mu.Unlock()
 
 	msg.ID = fmt.Sprintf("msg_%d", time.Now().UnixNano())
 	msg.Timestamp = time.Now()
 
-	// إرسال الرسالة
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+
 	select {
 	case sb.sourceToTarget <- msg:
-		sb.messagesSent++
-		sb.bytesTransferred += int64(len(msg.Content))
-		sb.lastActivity = time.Now()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		return fmt.Errorf("timeout sending message")
 	}
 }
@@ -248,8 +252,10 @@ func (sb *SessionBridge) processSourceToTarget() {
 			// نشر الحدث على EventBus
 			sb.publishBridgeEvent(msg)
 
+			sb.mu.Lock()
 			sb.messagesReceived++
 			sb.lastActivity = time.Now()
+			sb.mu.Unlock()
 
 		case <-sb.ctx.Done():
 			return
@@ -271,8 +277,10 @@ func (sb *SessionBridge) processTargetToSource() {
 			// نشر الحدث على EventBus
 			sb.publishBridgeEvent(msg)
 
+			sb.mu.Lock()
 			sb.messagesReceived++
 			sb.lastActivity = time.Now()
+			sb.mu.Unlock()
 
 		case <-sb.ctx.Done():
 			return

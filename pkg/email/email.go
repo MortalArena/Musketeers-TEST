@@ -2,6 +2,7 @@ package email
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/mail"
@@ -206,6 +207,11 @@ func (c *EmailClient) Send(msg *EmailMessage) error {
 // SendAsync إرسال بريد إلكتروني بشكل غير متزامن
 func (c *EmailClient) SendAsync(msg *EmailMessage, callback func(error)) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
 		err := c.Send(msg)
 		if callback != nil {
 			callback(err)
@@ -305,6 +311,9 @@ func (s *EmailServer) acceptConnections() {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			continue
 		}
 

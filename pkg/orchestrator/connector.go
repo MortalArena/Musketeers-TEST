@@ -221,14 +221,22 @@ func (c *Connector) Stop() error {
 	// [FIX] إضافة timeout للانتظار
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				c.logger.Error("connector shutdown waiter panicked", zap.Any("panic", r))
+			}
+		}()
 		c.wg.Wait()
 		close(done)
 	}()
 
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+
 	select {
 	case <-done:
 		// WaitGroup انتهى بنجاح
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		// [FIX] timeout - لا ننتظر أكثر من 5 ثواني
 		c.logger.Warn("Timeout أثناء انتظار goroutines للإنهاء")
 	}
@@ -437,6 +445,10 @@ func (c *Connector) processLane(laneType agent_bridge.LaneType) {
 			case <-c.ctx.Done():
 				return
 			case c.bridgeToEventBus <- msg:
+			default:
+				c.logger.Warn("bridgeToEventBus full, dropping message",
+					zap.String("msg_type", string(msg.Type)),
+				)
 			}
 		}
 	}

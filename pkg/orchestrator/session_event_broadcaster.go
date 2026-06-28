@@ -126,8 +126,10 @@ func (seb *SessionEventBroadcaster) BroadcastEvent(event *SessionEvent) error {
 		Data:        event.Data,
 		Timestamp:   event.Timestamp,
 	}
+	session.mu.Lock()
 	session.Events = append(session.Events, sessionEvent)
 	session.UpdatedAt = time.Now()
+	session.mu.Unlock()
 
 	// بث الحدث لجميع المشاركين في الجلسة
 	for _, participantID := range session.Participants {

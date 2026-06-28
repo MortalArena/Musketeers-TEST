@@ -234,6 +234,11 @@ func (s *Server) Start() error {
 
 	// Start system channel listener for agent synchronization
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.log.WithField("panic", r).Error("system channel listener panicked")
+			}
+		}()
 		// Wait a second for bootstrap nodes and pubsub to settle
 		time.Sleep(1 * time.Second)
 		s.log.Info("بدء الاستماع لقناة النظام الموحدة لمزامنة القنوات")
@@ -552,6 +557,11 @@ func (s *Server) joinChannelAndListen(channelID string) error {
 
 	// start a goroutine to read messages
 	go func(cID string, subscription *pubsub.Subscription) {
+		defer func() {
+			if r := recover(); r != nil {
+				s.log.WithField("panic", r).Errorf("channel reader for %s panicked", cID)
+			}
+		}()
 		s.log.Infof("بدء الاستماع للقناة: %s", cID)
 		for {
 			msg, err := subscription.Next(context.Background())
@@ -596,6 +606,11 @@ func (s *Server) joinChannelAndListen(channelID string) error {
 
 					if shouldRespond {
 						go func(text string) {
+							defer func() {
+								if r := recover(); r != nil {
+									s.log.WithField("panic", r).Error("auto-responder panicked")
+								}
+							}()
 							// 1.5s typing delay simulation
 							time.Sleep(1500 * time.Millisecond)
 							ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -637,6 +652,11 @@ func (s *Server) handleChannelsJoin(w http.ResponseWriter, r *http.Request) {
 	// Broadcast the newly joined channel to other agents over the system channel (unless it is the system channel itself)
 	if req.ChannelID != "_musketeers_system_channels" {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					s.log.WithField("panic", r).Error("channel broadcast goroutine panicked")
+				}
+			}()
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			s.node.PublishChannelMessage(ctx, "_musketeers_system_channels", req.ChannelID)

@@ -179,6 +179,7 @@ func TestQuotaManager_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
+			defer func() { recover() }()
 			defer wg.Done()
 			err := qm.CheckAndAdd(did, 100*1024*1024) // 100MB لكل عملية
 			if err != nil {

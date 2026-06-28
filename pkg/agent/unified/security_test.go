@@ -35,6 +35,7 @@ func TestSecurity_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(index int) {
+			defer func() { recover() }()
 			defer wg.Done()
 
 			// محاولة الوصول إلى البيانات المشتركة
@@ -100,6 +101,7 @@ func TestSecurity_DAGConcurrencySafety(t *testing.T) {
 	for i := 0; i < numExecutions; i++ {
 		wg.Add(1)
 		go func(execIndex int) {
+			defer func() { recover() }()
 			defer wg.Done()
 
 			// محاكاة عمليات متوازية

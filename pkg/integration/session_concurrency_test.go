@@ -167,6 +167,7 @@ func TestAgentToAgentCommunication(t *testing.T) {
 		for i := 0; i < 50; i++ {
 			wg.Add(1)
 			go func(n int) {
+				defer func() { recover() }()
 				defer wg.Done()
 				from := fmt.Sprintf("agent_%d", n%5)
 				to := fmt.Sprintf("agent_%d", (n+1)%5)
@@ -219,17 +220,19 @@ func TestSessionEventBus_MultiAgent(t *testing.T) {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
+				timer := time.NewTimer(time.Second)
+				defer timer.Stop()
 				select {
 				case event := <-channels[idx]:
-					mu.Lock()
-					received[idx] = true
-					mu.Unlock()
 					if event.EventType != unified.AgentMessage {
 						t.Errorf("unexpected event type: %s", event.EventType)
 					}
-				case <-time.After(time.Second):
+				case <-timer.C:
 					t.Errorf("agent_%d timed out waiting for broadcast", idx)
 				}
+				mu.Lock()
+				received[idx] = true
+				mu.Unlock()
 			}(i)
 		}
 
@@ -254,12 +257,14 @@ func TestSessionEventBus_MultiAgent(t *testing.T) {
 			t.Fatalf("SendToAgent failed: %v", err)
 		}
 
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
 		select {
 		case event := <-ch:
 			if event.TargetAgent != "agent_3" {
 				t.Errorf("wrong target: %s", event.TargetAgent)
 			}
-		case <-time.After(time.Second):
+		case <-timer.C:
 			t.Fatal("agent_3 timed out waiting for targeted message")
 		}
 	})
@@ -271,9 +276,11 @@ func TestSessionEventBus_MultiAgent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < agentCount; i++ {
+				timer := time.NewTimer(500 * time.Millisecond)
 				select {
 				case <-mgrCh:
-				case <-time.After(500 * time.Millisecond):
+					timer.Stop()
+				case <-timer.C:
 					t.Errorf("session manager missed event %d", i)
 				}
 			}
@@ -327,10 +334,12 @@ func TestSessionEventBus_HighLoad(t *testing.T) {
 			defer wg.Done()
 			<-publishStart
 			for eventCount := 0; eventCount < 100; eventCount++ {
+				timer := time.NewTimer(5 * time.Second)
 				select {
 				case <-channels[idx]:
+					timer.Stop()
 					received[idx]++
-				case <-time.After(5 * time.Second):
+				case <-timer.C:
 					return
 				}
 			}
@@ -382,6 +391,7 @@ func TestSessionEventBus_ConcurrentEvents(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		pubWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer pubWg.Done()
 			for j := 0; j < 10; j++ {
 				bus.SendToSessionManager(ctx, fmt.Sprintf("conc_agent_%d", id), unified.SystemAlert, fmt.Sprintf("alert_%d_%d", id, j))
@@ -408,11 +418,14 @@ func TestSessionEventBus_ConcurrentEvents(t *testing.T) {
 	drainCount := 0
 	drainDone := make(chan struct{})
 	go func() {
+		defer func() { recover() }()
 		for {
+			timer := time.NewTimer(100 * time.Millisecond)
 			select {
 			case <-mgrCh:
+				timer.Stop()
 				drainCount++
-			case <-time.After(100 * time.Millisecond):
+			case <-timer.C:
 				close(drainDone)
 				return
 			}
@@ -455,6 +468,7 @@ func TestAgentCommunicationWithEventBus(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			agentID := fmt.Sprintf("integ_agent_%d", id)
 
@@ -525,6 +539,7 @@ func TestCollectiveMemory_ConcurrentAgents(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		wg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
 				event := session.MemoryEvent{
@@ -558,6 +573,7 @@ func TestCollectiveMemory_ConcurrentAgents(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		readWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer readWg.Done()
 			filters := map[string]interface{}{
 				"agent_did": fmt.Sprintf("did:agent:%d", id),
@@ -575,6 +591,7 @@ func TestCollectiveMemory_ConcurrentAgents(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		factWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer factWg.Done()
 			fact := session.MemoryFact{
 				ID:        fmt.Sprintf("fact_%d", id),
@@ -608,6 +625,7 @@ func TestAgentRegistry_ConcurrentRegisterUnregister(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		wg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			a := newTestAgent(fmt.Sprintf("reg_agent_%d", id), fmt.Sprintf("Agent-%d", id), "test", "v1")
 			if err := reg.Register(a, nil); err != nil {
@@ -632,6 +650,7 @@ func TestAgentRegistry_ConcurrentRegisterUnregister(t *testing.T) {
 	for i := 0; i < 15; i++ {
 		unregWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer unregWg.Done()
 			if err := reg.Unregister(fmt.Sprintf("reg_agent_%d", id)); err != nil {
 				errChan2 <- fmt.Errorf("unregister %d: %w", id, err)
@@ -676,6 +695,7 @@ func TestScaledAgentCommunication(t *testing.T) {
 			for i := 0; i < count; i++ {
 				wg.Add(1)
 				go func(id int) {
+					defer func() { recover() }()
 					defer wg.Done()
 					from := fmt.Sprintf("agent_%d", id)
 					err := comm.BroadcastMessage(from, fmt.Sprintf("hello from %d", id), "info")
@@ -860,6 +880,7 @@ func TestSessionManager_AgentLifecycle(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		statWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer statWg.Done()
 			reg.UpdateStats(fmt.Sprintf("worker_%d", id), true, 100, time.Second)
 		}(i)
@@ -893,6 +914,7 @@ func TestSessionManager_AgentLifecycle(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		unregWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer unregWg.Done()
 			if err := reg.Unregister(fmt.Sprintf("worker_%d", id)); err != nil {
 				t.Errorf("manager unregister worker %d: %v", id, err)
@@ -968,6 +990,7 @@ func TestComprehensiveSessionConcurrency(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		memWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer memWg.Done()
 			for j := 0; j < 5; j++ {
 				evt := session.MemoryEvent{
@@ -1001,6 +1024,7 @@ func TestComprehensiveSessionConcurrency(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		commWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer commWg.Done()
 			from := fmt.Sprintf("comp_agent_%d", id)
 
@@ -1039,6 +1063,7 @@ func TestComprehensiveSessionConcurrency(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		skillWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer skillWg.Done()
 			agentID := fmt.Sprintf("comp_agent_%d", id)
 			skills.RegisterAgent(agentID, "developer")
@@ -1107,6 +1132,7 @@ func TestDynamicAgentLifecycle(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		workWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer workWg.Done()
 			agentID := fmt.Sprintf("base_%d", id)
 			for j := 0; j < 20; j++ {
@@ -1126,6 +1152,7 @@ func TestDynamicAgentLifecycle(t *testing.T) {
 	for i := 0; i < 15; i++ {
 		lifecycleWg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer lifecycleWg.Done()
 			newID := fmt.Sprintf("dynamic_%d", id)
 			a := newTestAgent(newID, fmt.Sprintf("Dynamic-%d", id), "dynamic", "v1")
@@ -1255,6 +1282,7 @@ func TestToolRegistry_MultiAgentPermissions(t *testing.T) {
 		for i := 0; i < 50; i++ {
 			wg.Add(1)
 			go func(n int) {
+				defer func() { recover() }()
 				defer wg.Done()
 				role := tools.RoleRegular
 				if n%2 == 0 {
@@ -1296,6 +1324,7 @@ func TestConcurrentSkillsAndMemory(t *testing.T) {
 	for i := 0; i < agentCount; i++ {
 		wg.Add(1)
 		go func(id int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			agentID := fmt.Sprintf("skilled_agent_%d", id)
 

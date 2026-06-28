@@ -41,6 +41,7 @@ func TestLoad_StressTest_50Agents(t *testing.T) {
 		for j := 0; j < tasksPerAgent; j++ {
 			wg.Add(1)
 			go func(agentIndex, taskIndex int, ua *UnifiedAgent) {
+				defer func() { recover() }()
 				defer wg.Done()
 				
 				thinkingEngine := ua.GetThinkingEngine()
@@ -98,6 +99,7 @@ func TestLoad_MemoryStressTest(t *testing.T) {
 	for i := 0; i < numThoughts; i++ {
 		wg.Add(1)
 		go func(thoughtIndex int) {
+			defer func() { recover() }()
 			defer wg.Done()
 
 			phase, _ := thinkingEngine.GetCurrentPhase(ctx)

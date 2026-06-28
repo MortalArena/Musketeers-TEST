@@ -116,6 +116,11 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func(workerID int) {
+			defer func() {
+				if r := recover(); r != nil {
+					_ = r
+				}
+			}()
 			defer wg.Done()
 
 			nonce := make([]byte, 32)
@@ -177,6 +182,11 @@ func MineIdentity(ctx context.Context, did string, difficulty int) (*PoWResult, 
 
 	// Wait for result
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
 		wg.Wait()
 		close(resultChan)
 		close(errorChan)

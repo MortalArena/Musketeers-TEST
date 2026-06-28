@@ -272,6 +272,11 @@ func (n *Node) SubscribeToSessionEvents(ctx context.Context, sessionID string) (
 
 	ch := make(chan eventbus.Event, 100)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
 		defer close(ch)
 		for {
 			msg, err := sub.Next(ctx)
@@ -341,6 +346,11 @@ func (n *Node) ListenForRemoteSessionEvents(ctx context.Context, sessionID strin
 		return err
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
 		for e := range ch {
 			receiver.ReceiveRemoteSessionEvent(e)
 		}

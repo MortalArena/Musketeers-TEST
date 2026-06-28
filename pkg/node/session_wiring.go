@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/agent/unified"
@@ -44,8 +45,14 @@ type SessionWiringConfig struct {
 //  8. SessionNetworkBridge → ChatManager (remote chat messages)
 //  9. SessionNetworkBridge → Journal (remote journal entries)
 func WireSessionComponents(ctx context.Context, cfg *SessionWiringConfig) (*SessionNetworkBridge, *unified.SessionEventBusBridge, *A2ANetworkBridge, error) {
-	if cfg == nil || cfg.Node == nil || cfg.SessionContainer == nil {
-		return nil, nil, nil, nil
+	if cfg == nil {
+		return nil, nil, nil, fmt.Errorf("session wiring config is nil")
+	}
+	if cfg.Node == nil {
+		return nil, nil, nil, fmt.Errorf("node is nil in session wiring config")
+	}
+	if cfg.SessionContainer == nil {
+		return nil, nil, nil, fmt.Errorf("session container is nil in session wiring config")
 	}
 
 	sc := cfg.SessionContainer

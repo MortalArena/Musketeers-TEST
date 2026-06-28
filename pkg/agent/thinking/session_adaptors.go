@@ -32,7 +32,9 @@ func (a *SessionJournalAdaptor) GetRecentEvents(limit int) []JournalEntry {
 	for i, se := range sessionEntries {
 		var details map[string]interface{}
 		if se.Details != nil {
-			json.Unmarshal(se.Details, &details)
+			if err := json.Unmarshal(se.Details, &details); err != nil {
+				details = map[string]interface{}{}
+			}
 		}
 		entries[i] = JournalEntry{
 			ID:         se.ID,
@@ -58,7 +60,9 @@ func (a *SessionJournalAdaptor) GetEventsByType(eventType string) []JournalEntry
 	for i, se := range sessionEntries {
 		var details map[string]interface{}
 		if se.Details != nil {
-			json.Unmarshal(se.Details, &details)
+			if err := json.Unmarshal(se.Details, &details); err != nil {
+				details = map[string]interface{}{}
+			}
 		}
 		entries[i] = JournalEntry{
 			ID:         se.ID,
@@ -84,7 +88,9 @@ func (a *SessionJournalAdaptor) GetEventsByAgent(agentID string) []JournalEntry 
 	for i, se := range sessionEntries {
 		var details map[string]interface{}
 		if se.Details != nil {
-			json.Unmarshal(se.Details, &details)
+			if err := json.Unmarshal(se.Details, &details); err != nil {
+				details = map[string]interface{}{}
+			}
 		}
 		entries[i] = JournalEntry{
 			ID:         se.ID,
@@ -110,7 +116,9 @@ func (a *SessionJournalAdaptor) GetAllEvents() []JournalEntry {
 	for i, se := range sessionEntries {
 		var details map[string]interface{}
 		if se.Details != nil {
-			json.Unmarshal(se.Details, &details)
+			if err := json.Unmarshal(se.Details, &details); err != nil {
+				details = map[string]interface{}{}
+			}
 		}
 		entries[i] = JournalEntry{
 			ID:         se.ID,

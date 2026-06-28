@@ -141,6 +141,11 @@ func main() {
 	// [HOW] يستقبل المهام من Bridge وينفذها باستخدام النظام الموحد
 	// [SAFETY] يستخدم goroutine لعدم حظر البرنامج الرئيسي
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithField("panic", r).Error("task executor loop panicked")
+			}
+		}()
 		for {
 			// [HOW] في التنفيذ الحالي، الوكيل ينتظر المهام
 			// في المستقبل، سيتم إضافة منطق استقبال المهام من Bridge

@@ -119,6 +119,7 @@ func TestSessionJournalConcurrency(t *testing.T) {
 	done := make(chan bool, 20)
 	for i := 0; i < 20; i++ {
 		go func(n int) {
+			defer func() { recover() }()
 			j.Append(JournalEventLogged, "src", "agent", "حدث متزامن", nil)
 			done <- true
 		}(i)

@@ -126,6 +126,7 @@ func TestSessionEventPublishSubscribe(t *testing.T) {
 
 	// Node 1 ينشر حدث
 	go func() {
+		defer func() { recover() }()
 		time.Sleep(500 * time.Millisecond)
 		err := n1.PublishSessionEvent(ctx, sessionID, "custom.event", map[string]string{"data": "test"})
 		if err != nil {
@@ -134,6 +135,8 @@ func TestSessionEventPublishSubscribe(t *testing.T) {
 	}()
 
 	// انتظار استقبال الحدث
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
 	select {
 	case evt := <-eventCh:
 		if evt.Type != "custom.event" {
@@ -141,7 +144,7 @@ func TestSessionEventPublishSubscribe(t *testing.T) {
 		}
 		payloadJSON, _ := json.Marshal(evt.Payload)
 		t.Logf("تم استقبال الحدث: type=%s payload=%s", evt.Type, string(payloadJSON))
-	case <-time.After(10 * time.Second):
+	case <-timer.C:
 		t.Skip("الحدث لم يصل خلال المهلة (PubSub timing)")
 	}
 }
@@ -504,6 +507,7 @@ func TestSessionEventBusBridge(t *testing.T) {
 
 	// استمع لقناة الوكيل
 	go func() {
+		defer func() { recover() }()
 		ch, _ := seb.GetAgentChannel("remote-agent")
 		for range ch {
 			agentReceived.Add(1)

@@ -359,6 +359,8 @@ func (um *UpgradeManager) performUpgrade(upgrade *Upgrade, version *Version) {
 		return
 	}
 	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+	defer tmpFile.Close()
 
 	resp, err := http.Get(downloadURL)
 	if err != nil {
@@ -375,10 +377,10 @@ func (um *UpgradeManager) performUpgrade(upgrade *Upgrade, version *Version) {
 		um.failUpgrade(upgrade, fmt.Sprintf("download returned status: %s", resp.Status))
 		return
 	}
+	defer resp.Body.Close()
 
 	hash := sha256.New()
 	written, err := io.Copy(io.MultiWriter(tmpFile, hash), resp.Body)
-	resp.Body.Close()
 	tmpFile.Close()
 
 	if err != nil {

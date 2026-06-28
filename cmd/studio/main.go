@@ -462,8 +462,13 @@ func main() {
 
 	// [FIX] Test execution عبر OrchestratorEngine (Phase A من Canonical Path)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithField("panic", r).Error("orchestrator test task goroutine panicked")
+			}
+		}()
 		taskCtx, taskCancel := context.WithTimeout(context.Background(), 15*time.Second)
-		taskCancel()
+		defer taskCancel()
 		testTask := &pkgAgent.AgentTask{
 			ID:    "test-task-1",
 			Title: "تحليل ملفات المشروع",
@@ -661,6 +666,11 @@ func main() {
 
 	httpProxy := pkgDomain.NewHTTPProxy(n.Host(), "127.0.0.1:8080")
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithField("panic", r).Error("HTTP proxy goroutine panicked")
+			}
+		}()
 		if err := httpProxy.Start(); err != nil {
 			log.WithError(err).Warn("Failed to start HTTP proxy")
 		}
@@ -802,6 +812,11 @@ func main() {
 
 	// بدء REST API Server في الخلفية
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithField("panic", r).Error("API server goroutine panicked")
+			}
+		}()
 		if err := apiServer.Start(); err != nil {
 			log.WithError(err).Fatal("API server failed to start")
 		}

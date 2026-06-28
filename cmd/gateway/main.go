@@ -64,6 +64,11 @@ func main() {
 
 	gw := gateway.NewServer(n, *port, log)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithField("panic", r).Error("gateway server goroutine panicked")
+			}
+		}()
 		var err error
 		if *tls {
 			err = gw.StartTLS(*cert, *key)

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/dgraph-io/badger/v4"
@@ -28,7 +29,7 @@ func (s *MemoryStateStore) Get(key string) ([]byte, error) {
 	defer s.mu.RUnlock()
 	val, exists := s.data[key]
 	if !exists {
-		return nil, nil
+		return nil, fmt.Errorf("key not found: %s", key)
 	}
 	return append([]byte(nil), val...), nil
 }

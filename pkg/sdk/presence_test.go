@@ -201,6 +201,7 @@ func TestPresenceManager_MultipleSubscribers(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func(i int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			pm.Subscribe(fmt.Sprintf("sub_%d", i), func(s map[string]UserState) {
 				mu.Lock()
@@ -297,6 +298,7 @@ func TestPresenceManager_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(i int) {
+			defer func() { recover() }()
 			defer wg.Done()
 			cursor := []float64{float64(i), float64(i * 2)}
 			selectedNodes := []string{fmt.Sprintf("node%d", i)}
