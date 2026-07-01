@@ -9,6 +9,8 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/agent"
 	"github.com/MortalArena/Musketeers/pkg/agent/thinking"
 	"github.com/MortalArena/Musketeers/pkg/agent/tools"
+	"github.com/MortalArena/Musketeers/pkg/lifecycle"
+	"github.com/MortalArena/Musketeers/pkg/providers"
 	"github.com/MortalArena/Musketeers/pkg/session"
 	"go.uber.org/zap"
 )
@@ -57,6 +59,11 @@ type AgentPool struct {
 	sharedExecutor   *tools.ToolExecutor       // منفذ مشترك (اختياري)
 	sessionContainer *session.SessionContainer // جلسة حقيقية لربط الـ ThinkingEngines
 	eventBus         *SessionEventBus          // [SAFETY] لفصل الوكيل من ناقل الأحداث عند الإزالة
+	defaultProvider  providers.Provider        // [FIX] Provider الافتراضي لربط الموديلات بكل ThinkingEngine
+	defaultModelID   string                    // [FIX] Model ID الافتراضي
+
+	// Lifecycle
+	lifecycle *lifecycle.LifecycleMixin
 }
 
 // AgentInstance يمثل وكيلاً حقيقياً في الجلسة
@@ -92,6 +99,13 @@ type AgentInstance struct {
 	cancel context.CancelFunc
 }
 
+// GetStatus يرجع حالة الوكيل
+func (ai *AgentInstance) GetStatus() PoolAgentStatus {
+	ai.mu.RLock()
+	defer ai.mu.RUnlock()
+	return ai.status
+}
+
 // NewAgentPool ينشئ AgentPool جديد
 func NewAgentPool(sessionID string, config AgentPoolConfig, toolRegistry *tools.ToolRegistry, logger *zap.Logger) *AgentPool {
 	if config.MaxAgents <= 0 {
@@ -110,6 +124,7 @@ func NewAgentPool(sessionID string, config AgentPoolConfig, toolRegistry *tools.
 		logger:       logger,
 		instances:    make(map[string]*AgentInstance),
 		toolRegistry: toolRegistry,
+		lifecycle:    lifecycle.NewLifecycleMixin(),
 	}
 }
 
@@ -139,6 +154,20 @@ func (ap *AgentPool) SetEventBus(eventBus *SessionEventBus) {
 	ap.mu.Lock()
 	defer ap.mu.Unlock()
 	ap.eventBus = eventBus
+}
+
+// SetDefaultProvider يضبط Provider الافتراضي لربط الموديلات بكل ThinkingEngine
+func (ap *AgentPool) SetDefaultProvider(provider providers.Provider) {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+	ap.defaultProvider = provider
+}
+
+// SetDefaultModelID يضبط Model ID الافتراضي لكل ThinkingEngine
+func (ap *AgentPool) SetDefaultModelID(modelID string) {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+	ap.defaultModelID = modelID
 }
 
 // SetAgentCancelFunc يخزن دالة إلغاء سياق الوكيل لإيقاف الغوروتينات عند الإزالة
@@ -230,6 +259,18 @@ func (ap *AgentPool) GetAgent(agentID string) (*AgentInstance, error) {
 	return instance, nil
 }
 
+// ListAgents يرجع جميع AgentInstance في AgentPool
+func (ap *AgentPool) ListAgents() []*AgentInstance {
+	ap.mu.RLock()
+	defer ap.mu.RUnlock()
+
+	agents := make([]*AgentInstance, 0, len(ap.instances))
+	for _, instance := range ap.instances {
+		agents = append(agents, instance)
+	}
+	return agents
+}
+
 // GetOrCreateThinkingEngine يحصل على ThinkingEngine للوكيل (lazy init)
 // [SAFETY] القفل على ap.mu محتفظ به أثناء الحصول على instance.mu
 // لمنع سباق TOCTOU مع RemoveAgent/ParkAgent
@@ -293,6 +334,19 @@ func (ap *AgentPool) initThinkingEngine(instance *AgentInstance) error {
 	// ربط بـ WorkflowEngine الحقيقي (مشترك بين الوكلاء)
 	if ap.sessionContainer != nil && ap.sessionContainer.Workflow != nil {
 		te.SetWorkflowEngine(ap.sessionContainer.Workflow)
+	}
+
+	// [FIX] ربط Provider و Model بـ ThinkingEngine لتنفيذ المهام الفعلي
+	// هذا ضروري لكي يتمكن كل وكيل من استخدام الموديلات
+	if ap.defaultProvider != nil && ap.defaultModelID != "" {
+		te.SetProvider(ap.defaultProvider, ap.defaultModelID)
+		ap.logger.Info("Provider and model set for ThinkingEngine",
+			zap.String("agent_id", instance.AgentID),
+			zap.String("provider", string(ap.defaultProvider.Type())),
+			zap.String("model", ap.defaultModelID))
+	} else {
+		ap.logger.Warn("No default provider or model set, ThinkingEngine will need manual provider configuration",
+			zap.String("agent_id", instance.AgentID))
 	}
 
 	// [NEW] Auto-wire ContextReranker من SessionContainer
@@ -632,4 +686,57 @@ func (ap *AgentPool) parkIdleAgents() {
 	if parked > 0 {
 		ap.logger.Debug("تم تعطيل وكلاء خاملين", zap.Int("parked", parked))
 	}
+}
+
+// ============================================================
+// Lifecycle Methods - تطبيق Lifecycle Interface
+// ============================================================
+
+// Start يبدأ AgentPool
+func (ap *AgentPool) Start(ctx context.Context) error {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+
+	ap.lifecycle.SetStatus(lifecycle.LifecycleStatusStarting)
+	ap.lifecycle.SetStatus(lifecycle.LifecycleStatusRunning)
+	return nil
+}
+
+// Stop يوقف AgentPool
+func (ap *AgentPool) Stop(ctx context.Context) error {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+
+	ap.lifecycle.SetStatus(lifecycle.LifecycleStatusStopping)
+	ap.lifecycle.SetStatus(lifecycle.LifecycleStatusStopped)
+	return nil
+}
+
+// Close يغلق AgentPool
+func (ap *AgentPool) Close() error {
+	return ap.Stop(ap.lifecycle.Context())
+}
+
+// Shutdown يوقف AgentPool بشكل آمن
+func (ap *AgentPool) Shutdown(ctx context.Context) error {
+	return ap.Stop(ctx)
+}
+
+// Cancel يلغي العمليات الجارية
+func (ap *AgentPool) Cancel() error {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+
+	ap.lifecycle.CancelContext()
+	return nil
+}
+
+// IsRunning يتحقق مما إذا كان يعمل
+func (ap *AgentPool) IsRunning() bool {
+	return ap.lifecycle.IsRunningMixin()
+}
+
+// Status يرجع الحالة
+func (ap *AgentPool) Status() lifecycle.LifecycleStatus {
+	return ap.lifecycle.GetStatus()
 }

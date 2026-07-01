@@ -17,6 +17,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/agent/validation"
 	"github.com/MortalArena/Musketeers/pkg/agent/wiring"
 	"github.com/MortalArena/Musketeers/pkg/cache"
+	"github.com/MortalArena/Musketeers/pkg/lifecycle"
 	"github.com/MortalArena/Musketeers/pkg/metrics"
 	"github.com/MortalArena/Musketeers/pkg/providers"
 	"github.com/MortalArena/Musketeers/pkg/session"
@@ -103,6 +104,9 @@ type UnifiedAgent struct {
 
 	logger *zap.Logger
 	mu     sync.RWMutex
+
+	// Lifecycle
+	lifecycle *lifecycle.LifecycleMixin
 }
 
 // NewUnifiedAgent ينشئ وكيل موحد جديد
@@ -111,6 +115,7 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 		sessionID: sessionID,
 		agentID:   agentID,
 		logger:    logger,
+		lifecycle: lifecycle.NewLifecycleMixin(),
 	}
 
 	// إنشاء الأنظمة المدمجة الشاملة
@@ -164,8 +169,8 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 	ua.providerRegistry = providers.NewProviderRegistry()
 	ua.router = providers.NewRouter(ua.providerRegistry, providers.RouterConfig{})
 
-	// إنشاء ToolExecutor - استخدام المسار الحالي بدلاً من sessionID
-	ua.toolExecutor = tools.NewToolExecutor(".", logger)
+	// إنشاء ToolExecutor - استخدام مسار الجلسة
+	ua.toolExecutor = tools.NewToolExecutor("./sessions/"+sessionID, logger)
 
 	// إنشاء ThinkingEngine للتفكير العميق
 	ua.thinkingEngine = thinking.NewThinkingEngine(sessionID, agentID, logger)
@@ -1294,4 +1299,57 @@ func (ua *UnifiedAgent) startDataCuration(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// ============================================================
+// Lifecycle Methods - تطبيق Lifecycle Interface
+// ============================================================
+
+// Start يبدأ UnifiedAgent
+func (ua *UnifiedAgent) Start(ctx context.Context) error {
+	ua.mu.Lock()
+	defer ua.mu.Unlock()
+
+	ua.lifecycle.SetStatus(lifecycle.LifecycleStatusStarting)
+	ua.lifecycle.SetStatus(lifecycle.LifecycleStatusRunning)
+	return nil
+}
+
+// Stop يوقف UnifiedAgent
+func (ua *UnifiedAgent) Stop(ctx context.Context) error {
+	ua.mu.Lock()
+	defer ua.mu.Unlock()
+
+	ua.lifecycle.SetStatus(lifecycle.LifecycleStatusStopping)
+	ua.lifecycle.SetStatus(lifecycle.LifecycleStatusStopped)
+	return nil
+}
+
+// Close يغلق UnifiedAgent
+func (ua *UnifiedAgent) Close() error {
+	return ua.Stop(ua.lifecycle.Context())
+}
+
+// Shutdown يوقف UnifiedAgent بشكل آمن
+func (ua *UnifiedAgent) Shutdown(ctx context.Context) error {
+	return ua.Stop(ctx)
+}
+
+// Cancel يلغي العمليات الجارية
+func (ua *UnifiedAgent) Cancel() error {
+	ua.mu.Lock()
+	defer ua.mu.Unlock()
+
+	ua.lifecycle.CancelContext()
+	return nil
+}
+
+// IsRunning يتحقق مما إذا كان يعمل
+func (ua *UnifiedAgent) IsRunning() bool {
+	return ua.lifecycle.IsRunningMixin()
+}
+
+// Status يرجع الحالة
+func (ua *UnifiedAgent) Status() lifecycle.LifecycleStatus {
+	return ua.lifecycle.GetStatus()
 }

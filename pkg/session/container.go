@@ -12,6 +12,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/agent"
 	"github.com/MortalArena/Musketeers/pkg/agent/tools"
 	"github.com/MortalArena/Musketeers/pkg/eventbus"
+	"github.com/MortalArena/Musketeers/pkg/lifecycle"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -80,6 +81,12 @@ type SessionContainer struct {
 	// [NEW] Context Reranker — فهرسة وبحث سياقي ذكي (مثل Cursor @)
 	// [FIX] مخزن كـ interface{} لتجنب دوائر الاستيراد مع pkg/agent/thinking
 	ContextReranker interface{} `json:"-"` // [WHY] فهرسة جميع ملفات المشروع والبحث الذكي
+
+	// [FIX] Logger for logging operations
+	logger *zap.Logger `json:"-"` // [WHY] تسجيل العمليات والأخطاء
+
+	// Lifecycle
+	lifecycle *lifecycle.LifecycleMixin `json:"-"` // [WHY] إدارة دورة الحياة
 }
 
 // [WHY] UnifiedSessionState الحالة الموحدة للجلسة
@@ -293,6 +300,8 @@ func NewSessionContainer(ctx context.Context, db *badger.DB, config *SessionConf
 		EventBus:    eb,
 		ctx:         sessionCtx,
 		cancelFunc:  cancel,
+		logger:      zap.NewNop(), // [FIX] Initialize with no-op logger
+		lifecycle:   lifecycle.NewLifecycleMixin(),
 	}
 
 	// تهيئة المكونات
@@ -902,6 +911,13 @@ func (s *SessionContainer) RegisterAgentFromUnified(ua agent.UnifiedAgent, role 
 		return nil, fmt.Errorf("agent info cannot be nil")
 	}
 
+	s.logger.Info("RegisterAgentFromUnified called",
+		zap.String("agent_id", info.ID),
+		zap.String("agent_name", info.Name),
+		zap.String("role", role),
+		zap.String("provider", info.Provider),
+		zap.String("model", info.Model))
+
 	now := time.Now().UnixMilli()
 
 	// [WHY] جمع القدرات المعلنة
@@ -1316,6 +1332,59 @@ func (s *SessionContainer) GetContextReranker(logger *zap.Logger) interface{} {
 // [FIX] يقبل interface{} لتجنب import cycle
 func (s *SessionContainer) SetContextReranker(cr interface{}) {
 	s.ContextReranker = cr
+}
+
+// ============================================================
+// Lifecycle Methods - تطبيق Lifecycle Interface
+// ============================================================
+
+// Start يبدأ SessionContainer
+func (s *SessionContainer) Start(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.lifecycle.SetStatus(lifecycle.LifecycleStatusStarting)
+	s.lifecycle.SetStatus(lifecycle.LifecycleStatusRunning)
+	return nil
+}
+
+// StopLifecycle يوقف SessionContainer (Lifecycle)
+func (s *SessionContainer) StopLifecycle(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.lifecycle.SetStatus(lifecycle.LifecycleStatusStopping)
+	s.lifecycle.SetStatus(lifecycle.LifecycleStatusStopped)
+	return nil
+}
+
+// Close يغلق SessionContainer
+func (s *SessionContainer) Close() error {
+	return s.Stop() // استخدام دالة Stop الموجودة
+}
+
+// Shutdown يوقف SessionContainer بشكل آمن
+func (s *SessionContainer) Shutdown(ctx context.Context) error {
+	return s.Stop() // استخدام دالة Stop الموجودة
+}
+
+// Cancel يلغي العمليات الجارية
+func (s *SessionContainer) Cancel() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.lifecycle.CancelContext()
+	return nil
+}
+
+// IsRunning يتحقق مما إذا كان يعمل
+func (s *SessionContainer) IsRunning() bool {
+	return s.lifecycle.IsRunningMixin()
+}
+
+// GetLifecycleStatus يرجع حالة دورة الحياة
+func (s *SessionContainer) GetLifecycleStatus() lifecycle.LifecycleStatus {
+	return s.lifecycle.GetStatus()
 }
 
 // ToJSON يحول بيانات التصدير إلى JSON

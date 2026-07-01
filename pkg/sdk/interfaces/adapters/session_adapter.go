@@ -28,6 +28,8 @@ func (a *SessionAdapter) Status() string {
 	if a.container == nil {
 		return ""
 	}
+	// استخدام الحقل المباشر بدلاً من الدالة
+	// الحقل Status موجود في SessionContainer struct
 	return a.container.Status
 }
 

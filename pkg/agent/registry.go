@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/MortalArena/Musketeers/pkg/lifecycle"
 	"go.uber.org/zap"
 )
 
@@ -18,8 +20,9 @@ type AgentRegistry struct {
 	// حالة العميل البشري
 	humanClient *HumanClientStatus // حالة العميل البشري
 
-	mu     sync.RWMutex
-	logger *zap.Logger
+	mu        sync.RWMutex
+	logger    *zap.Logger
+	lifecycle *lifecycle.LifecycleMixin
 }
 
 // HumanClientStatus حالة العميل البشري
@@ -73,11 +76,61 @@ type AgentStats struct {
 // NewAgentRegistry ينشئ سجل وكلاء جديد
 func NewAgentRegistry() *AgentRegistry {
 	return &AgentRegistry{
-		agents:   make(map[string]UnifiedAgent),
-		metadata: make(map[string]*AgentMetadata),
-		stats:    make(map[string]*AgentStats),
-		logger:   zap.NewNop(), // سيتم استبداله بـ logger حقيقي
+		agents:    make(map[string]UnifiedAgent),
+		metadata:  make(map[string]*AgentMetadata),
+		stats:     make(map[string]*AgentStats),
+		logger:    zap.NewNop(), // سيتم استبداله بـ logger حقيقي
+		lifecycle: lifecycle.NewLifecycleMixin(),
 	}
+}
+
+// Start يبدأ AgentRegistry
+func (ar *AgentRegistry) Start(ctx context.Context) error {
+	ar.mu.Lock()
+	defer ar.mu.Unlock()
+
+	ar.lifecycle.SetStatus(lifecycle.LifecycleStatusStarting)
+	ar.lifecycle.SetStatus(lifecycle.LifecycleStatusRunning)
+	return nil
+}
+
+// Stop يوقف AgentRegistry
+func (ar *AgentRegistry) Stop(ctx context.Context) error {
+	ar.mu.Lock()
+	defer ar.mu.Unlock()
+
+	ar.lifecycle.SetStatus(lifecycle.LifecycleStatusStopping)
+	ar.lifecycle.SetStatus(lifecycle.LifecycleStatusStopped)
+	return nil
+}
+
+// Close يغلق AgentRegistry
+func (ar *AgentRegistry) Close() error {
+	return ar.Stop(ar.lifecycle.Context())
+}
+
+// Shutdown يوقف AgentRegistry بشكل آمن
+func (ar *AgentRegistry) Shutdown(ctx context.Context) error {
+	return ar.Stop(ctx)
+}
+
+// Cancel يلغي العمليات الجارية
+func (ar *AgentRegistry) Cancel() error {
+	ar.mu.Lock()
+	defer ar.mu.Unlock()
+
+	ar.lifecycle.CancelContext()
+	return nil
+}
+
+// IsRunning يتحقق مما إذا كان يعمل
+func (ar *AgentRegistry) IsRunning() bool {
+	return ar.lifecycle.IsRunningMixin()
+}
+
+// Status يرجع الحالة
+func (ar *AgentRegistry) Status() lifecycle.LifecycleStatus {
+	return ar.lifecycle.GetStatus()
 }
 
 // SetLogger يضبط logger

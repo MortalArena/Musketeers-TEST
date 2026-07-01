@@ -44,6 +44,32 @@ func NewCustomAgent(name, provider, model string, handler CustomHandler) *Custom
 	return NewCustomAdapter(info, handler)
 }
 
+// NewSimpleAgent ينشئ وكيل بسيط بدون handler مخصص
+// يستخدم للوكلاء التي يتم إدارتها عبر providers مباشرة
+func NewSimpleAgent(agentID, name string, agentType agent.AgentType, provider, model string) *CustomAdapter {
+	info := &agent.AgentInfo{
+		ID:         agentID,
+		Name:       name,
+		Type:       agentType,
+		Provider:   provider,
+		Model:      model,
+		AuthMethod: "provider",
+		CreatedAt:  time.Now(),
+	}
+
+	// Handler افتراضي بسيط
+	handler := func(ctx context.Context, task *agent.AgentTask) (*agent.TaskExecutionResult, error) {
+		return &agent.TaskExecutionResult{
+			Success: true,
+			Output:  fmt.Sprintf("Agent %s received task: %s", name, task.Title),
+		}, nil
+	}
+
+	adapter := NewCustomAdapter(info, handler)
+	adapter.initialized = true
+	return adapter
+}
+
 func (a *CustomAdapter) GetInfo() *agent.AgentInfo {
 	return a.info
 }

@@ -32,6 +32,36 @@ type SessionInfo struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Status          string // active, paused, completed
+	// معلومات نسخ الوكلاء - لدعم تعدد نسخ نفس الموديل
+	AgentInstances map[string]*AgentInstanceInfo
+	// معلومات العملاء البشريين
+	HumanClients map[string]*HumanClientInfo
+}
+
+// AgentInstanceInfo معلومات نسخة الوكيل
+type AgentInstanceInfo struct {
+	AgentID         string    `json:"agent_id"`
+	InstanceID      string    `json:"instance_id"`
+	HumanClientID   string    `json:"human_client_id"`
+	HumanClientName string    `json:"human_client_name"`
+	Provider        string    `json:"provider"`
+	Model           string    `json:"model"`
+	APIKeyID        string    `json:"api_key_id"`
+	APIKeyLabel     string    `json:"api_key_label"`
+	Role            string    `json:"role"`
+	Status          string    `json:"status"`
+	JoinedAt        time.Time `json:"joined_at"`
+}
+
+// HumanClientInfo معلومات العميل البشري
+type HumanClientInfo struct {
+	UserID      string                 `json:"user_id"`
+	Name        string                 `json:"name"`
+	Status      string                 `json:"status"`
+	LastSeen    time.Time              `json:"last_seen"`
+	Preferences map[string]interface{} `json:"preferences"`
+	Device      string                 `json:"device"`
+	Location    string                 `json:"location"`
 }
 
 // NewSessionManager ينشئ مدير جلسة
@@ -77,6 +107,8 @@ func (sm *SessionManager) CreateSession(ctx context.Context, name, ownerDID stri
 		ManagerAgentID:  managerAgentID,
 		AssistantAgents: assistantAgents,
 		RoleAssignments: make(map[string]string),
+		AgentInstances:  make(map[string]*AgentInstanceInfo),
+		HumanClients:    make(map[string]*HumanClientInfo),
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 		Status:          "active",
@@ -146,6 +178,11 @@ func (sm *SessionManager) AssignRole(sessionID, agentID string, role string, cap
 	)
 
 	return nil
+}
+
+// AssignRoleSimple نسخة مبسطة من AssignRole للتوافق مع الأنظمة القديمة
+func (sm *SessionManager) AssignRoleSimple(sessionID, agentID string, role string) error {
+	return sm.AssignRole(sessionID, agentID, role, nil, nil)
 }
 
 // GetSession يحصل على جلسة
@@ -304,4 +341,142 @@ func (sm *SessionManager) GetAssistantAgents(sessionID string) ([]agent.UnifiedA
 	}
 
 	return agents, nil
+}
+
+// RegisterAgentInstance يسجل نسخة وكيل في الجلسة
+func (sm *SessionManager) RegisterAgentInstance(sessionID, agentID, instanceID, humanClientID, humanClientName, provider, model, apiKeyID, apiKeyLabel, role string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, exists := sm.Sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("الجلسة %s غير موجودة", sessionID)
+	}
+
+	if session.AgentInstances == nil {
+		session.AgentInstances = make(map[string]*AgentInstanceInfo)
+	}
+
+	// إنشاء معرف فريد للنسخة
+	instanceKey := fmt.Sprintf("%s-%s", agentID, instanceID)
+
+	session.AgentInstances[instanceKey] = &AgentInstanceInfo{
+		AgentID:         agentID,
+		InstanceID:      instanceID,
+		HumanClientID:   humanClientID,
+		HumanClientName: humanClientName,
+		Provider:        provider,
+		Model:           model,
+		APIKeyID:        apiKeyID,
+		APIKeyLabel:     apiKeyLabel,
+		Role:            role,
+		Status:          "active",
+		JoinedAt:        time.Now(),
+	}
+
+	session.UpdatedAt = time.Now()
+
+	sm.Logger.Info("تم تسجيل نسخة وكيل في الجلسة",
+		zap.String("session_id", sessionID),
+		zap.String("agent_id", agentID),
+		zap.String("instance_id", instanceID),
+		zap.String("provider", provider),
+		zap.String("model", model),
+		zap.String("role", role),
+	)
+
+	return nil
+}
+
+// GetAgentInstances يحصل على نسخ الوكلاء في الجلسة
+func (sm *SessionManager) GetAgentInstances(sessionID string) ([]*AgentInstanceInfo, error) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, exists := sm.Sessions[sessionID]
+	if !exists {
+		return nil, fmt.Errorf("الجلسة %s غير موجودة", sessionID)
+	}
+
+	instances := make([]*AgentInstanceInfo, 0, len(session.AgentInstances))
+	for _, instance := range session.AgentInstances {
+		instances = append(instances, instance)
+	}
+
+	return instances, nil
+}
+
+// GetAgentInstancesByModel يحصل على نسخ الوكلاء حسب النموذج
+func (sm *SessionManager) GetAgentInstancesByModel(sessionID, model string) ([]*AgentInstanceInfo, error) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, exists := sm.Sessions[sessionID]
+	if !exists {
+		return nil, fmt.Errorf("الجلسة %s غير موجودة", sessionID)
+	}
+
+	instances := make([]*AgentInstanceInfo, 0)
+	for _, instance := range session.AgentInstances {
+		if instance.Model == model {
+			instances = append(instances, instance)
+		}
+	}
+
+	return instances, nil
+}
+
+// RegisterHumanClient يسجل عميل بشري في الجلسة
+func (sm *SessionManager) RegisterHumanClient(sessionID, userID, name, device, location string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, exists := sm.Sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("الجلسة %s غير موجودة", sessionID)
+	}
+
+	if session.HumanClients == nil {
+		session.HumanClients = make(map[string]*HumanClientInfo)
+	}
+
+	session.HumanClients[userID] = &HumanClientInfo{
+		UserID:      userID,
+		Name:        name,
+		Status:      "online",
+		LastSeen:    time.Now(),
+		Preferences: make(map[string]interface{}),
+		Device:      device,
+		Location:    location,
+	}
+
+	session.UpdatedAt = time.Now()
+
+	sm.Logger.Info("تم تسجيل عميل بشري في الجلسة",
+		zap.String("session_id", sessionID),
+		zap.String("user_id", userID),
+		zap.String("name", name),
+		zap.String("device", device),
+		zap.String("location", location),
+	)
+
+	return nil
+}
+
+// GetHumanClients يحصل على العملاء البشريين في الجلسة
+func (sm *SessionManager) GetHumanClients(sessionID string) ([]*HumanClientInfo, error) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, exists := sm.Sessions[sessionID]
+	if !exists {
+		return nil, fmt.Errorf("الجلسة %s غير موجودة", sessionID)
+	}
+
+	clients := make([]*HumanClientInfo, 0, len(session.HumanClients))
+	for _, client := range session.HumanClients {
+		clients = append(clients, client)
+	}
+
+	return clients, nil
 }

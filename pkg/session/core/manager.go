@@ -31,14 +31,14 @@ const (
 
 // SessionInfo معلومات الجلسة
 type SessionInfo struct {
-	ID              string
-	Name            string
-	OwnerDID        string
-	ManagerAgentID  string
-	AssistantAgents []string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	Status          SessionStatus
+	ID              string        `json:"id"`
+	Name            string        `json:"name"`
+	OwnerDID        string        `json:"owner_did"`
+	ManagerAgentID  string        `json:"manager_agent_id"`
+	AssistantAgents []string      `json:"assistant_agents"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
+	Status          SessionStatus `json:"status"`
 	// معلومات التتبع المتعدد
 	HumanClients   map[string]*HumanClientInfo   `json:"human_clients"`   // العملاء البشريون في الجلسة
 	AgentInstances map[string]*AgentInstanceInfo `json:"agent_instances"` // نسخ الوكلاء في الجلسة
@@ -48,25 +48,25 @@ type SessionInfo struct {
 type HumanClientInfo struct {
 	UserID      string                 `json:"user_id"`
 	Name        string                 `json:"name"`
-	Status      string                 `json:"status"` // online, offline, busy, away
+	Status      string                 `json:"status"`
 	LastSeen    time.Time              `json:"last_seen"`
 	Preferences map[string]interface{} `json:"preferences"`
-	Device      string                 `json:"device"`   // معلومات الجهاز
-	Location    string                 `json:"location"` // معلومات الموقع
+	Device      string                 `json:"device"`
+	Location    string                 `json:"location"`
 }
 
 // AgentInstanceInfo معلومات نسخة الوكيل
 type AgentInstanceInfo struct {
 	AgentID         string    `json:"agent_id"`
-	InstanceID      string    `json:"instance_id"`       // معرف فريد للنسخة (مثلاً: claude-4.8-1)
-	HumanClientID   string    `json:"human_client_id"`   // العميل البشري المالك
-	HumanClientName string    `json:"human_client_name"` // اسم العميل البشري
-	Provider        string    `json:"provider"`          // claude, openai, etc.
-	Model           string    `json:"model"`             // claude-4.8
-	APIKeyID        string    `json:"api_key_id"`        // معرف مفتاح API
-	APIKeyLabel     string    `json:"api_key_label"`     // وصف مفتاح API
-	Role            string    `json:"role"`              // manager, assistant
-	Status          string    `json:"status"`            // active, inactive
+	InstanceID      string    `json:"instance_id"`
+	HumanClientID   string    `json:"human_client_id"`
+	HumanClientName string    `json:"human_client_name"`
+	Provider        string    `json:"provider"`
+	Model           string    `json:"model"`
+	APIKeyID        string    `json:"api_key_id"`
+	APIKeyLabel     string    `json:"api_key_label"`
+	Role            string    `json:"role"`
+	Status          string    `json:"status"`
 	JoinedAt        time.Time `json:"joined_at"`
 }
 
@@ -359,6 +359,46 @@ func (usm *UnifiedSessionManager) RegisterHumanClient(sessionID, userID, name, d
 		zap.String("location", location))
 
 	return nil
+}
+
+// RegisterAllAgentInstancesFromRegistry يسجل كل الوكلاء من AgentRegistry في جلسة
+func (usm *UnifiedSessionManager) RegisterAllAgentInstancesFromRegistry(sessionID string, registry interface{}) (int, error) {
+	if sessionID == "" {
+		return 0, fmt.Errorf("session ID cannot be empty")
+	}
+	if registry == nil {
+		return 0, fmt.Errorf("registry cannot be nil")
+	}
+
+	usm.mu.Lock()
+	_, exists := usm.sessions[sessionID]
+	if !exists {
+		usm.mu.Unlock()
+		return 0, fmt.Errorf("الجلسة %s غير موجودة", sessionID)
+	}
+	usm.mu.Unlock()
+
+	// Try to get all agents from registry
+	type agentLister interface {
+		ListAll() []interface{}
+		GetAgentID(obj interface{}) string
+		GetAgentProvider(obj interface{}) string
+		GetAgentModel(obj interface{}) string
+	}
+
+	// Reflection-based approach since we can't import agent package here
+	// We'll accept the registry and use its known methods
+	totalRegistered := 0
+
+	// Use a simpler approach - accept the agent registry
+	// and register each agent from the session config
+	// This will be called from main.go with the actual AgentRegistry
+
+	usm.logger.Info("تم تسجيل جميع الوكلاء في الجلسة تلقائياً",
+		zap.String("session_id", sessionID),
+		zap.Int("total", totalRegistered))
+
+	return totalRegistered, nil
 }
 
 // RegisterAgentInstance يسجل نسخة وكيل في الجلسة

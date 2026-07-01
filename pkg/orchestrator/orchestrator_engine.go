@@ -10,6 +10,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/capability"
 	capgithub "github.com/MortalArena/Musketeers/pkg/capability/github"
 	"github.com/MortalArena/Musketeers/pkg/eventbus"
+	"github.com/MortalArena/Musketeers/pkg/lifecycle"
 	"github.com/MortalArena/Musketeers/pkg/policy"
 	"github.com/MortalArena/Musketeers/pkg/session"
 	"github.com/MortalArena/Musketeers/pkg/verification"
@@ -96,11 +97,15 @@ type OrchestratorEngine struct {
 	capabilityManager *capability.Manager
 	eventBus          *eventbus.EventBus
 	policyEngine      *policy.Engine
-	unifiedAgent      *unified.UnifiedAgent // مرجع للتكامل مع UnifiedAgent
+	unifiedAgent      *unified.UnifiedAgent     // مرجع للتكامل مع UnifiedAgent
 	sessionContainer  *session.SessionContainer // [NEW] مرجع للجلسة لمزامنة قدرات الوكلاء المحققة
+	delegationManager *DelegationManager        // [NEW] مدير التفويضات للتفويض الفعلي بين الوكلاء
 	logger            *zap.Logger
 	mu                sync.RWMutex
 	running           bool
+
+	// Lifecycle
+	lifecycle *lifecycle.LifecycleMixin
 }
 
 // NewOrchestratorEngine ينشئ محرك تنسيق جديد
@@ -131,6 +136,7 @@ func NewOrchestratorEngine(registry *agent.AgentRegistry) *OrchestratorEngine {
 		policyEngine:      polEng,
 		logger:            logger,
 		running:           false,
+		lifecycle:         lifecycle.NewLifecycleMixin(),
 	}
 }
 
@@ -168,6 +174,14 @@ func (oe *OrchestratorEngine) SetConnector(c *Connector) {
 	oe.logger.Info("تم ضبط Connector في OrchestratorEngine")
 }
 
+// SetDelegationManager يضبط DelegationManager في OrchestratorEngine
+func (oe *OrchestratorEngine) SetDelegationManager(dm *DelegationManager) {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+	oe.delegationManager = dm
+	oe.logger.Info("تم ضبط DelegationManager في OrchestratorEngine")
+}
+
 // SetPolicyMode يضبط وضع الـ Policy للـ Capability Manager
 func (oe *OrchestratorEngine) SetPolicyMode(mode capability.PolicyMode) {
 	oe.capabilityManager.SetPolicyMode(mode)
@@ -193,6 +207,13 @@ func (oe *OrchestratorEngine) GetConnector() *Connector {
 	oe.mu.RLock()
 	defer oe.mu.RUnlock()
 	return oe.connector
+}
+
+// GetRoleAssigner يرجع RoleAssigner
+func (oe *OrchestratorEngine) GetRoleAssigner() *RoleAssigner {
+	oe.mu.RLock()
+	defer oe.mu.RUnlock()
+	return oe.roleAssigner
 }
 
 // GetUnifiedAgent يرجع مرجع UnifiedAgent
@@ -576,4 +597,57 @@ func (oe *OrchestratorEngine) getRequiredCapabilities(task *agent.AgentTask) []a
 		agent.CapabilityCodeGeneration,
 		agent.CapabilityCodeReview,
 	}
+}
+
+// ============================================================
+// Lifecycle Methods - تطبيق Lifecycle Interface
+// ============================================================
+
+// StartLifecycle يبدأ دورة حياة OrchestratorEngine
+func (oe *OrchestratorEngine) StartLifecycle(ctx context.Context) error {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+
+	oe.lifecycle.SetStatus(lifecycle.LifecycleStatusStarting)
+	oe.lifecycle.SetStatus(lifecycle.LifecycleStatusRunning)
+	return nil
+}
+
+// StopLifecycle يوقف دورة حياة OrchestratorEngine
+func (oe *OrchestratorEngine) StopLifecycle(ctx context.Context) error {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+
+	oe.lifecycle.SetStatus(lifecycle.LifecycleStatusStopping)
+	oe.lifecycle.SetStatus(lifecycle.LifecycleStatusStopped)
+	return nil
+}
+
+// Close يغلق OrchestratorEngine
+func (oe *OrchestratorEngine) Close() error {
+	return oe.Stop(oe.lifecycle.Context())
+}
+
+// Shutdown يوقف OrchestratorEngine بشكل آمن
+func (oe *OrchestratorEngine) Shutdown(ctx context.Context) error {
+	return oe.Stop(ctx)
+}
+
+// Cancel يلغي العمليات الجارية
+func (oe *OrchestratorEngine) Cancel() error {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+
+	oe.lifecycle.CancelContext()
+	return nil
+}
+
+// IsRunningLifecycle يتحقق مما إذا كانت دورة الحياة تعمل
+func (oe *OrchestratorEngine) IsRunningLifecycle() bool {
+	return oe.lifecycle.IsRunningMixin()
+}
+
+// GetLifecycleStatus يرجع حالة دورة الحياة
+func (oe *OrchestratorEngine) GetLifecycleStatus() lifecycle.LifecycleStatus {
+	return oe.lifecycle.GetStatus()
 }

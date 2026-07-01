@@ -6,20 +6,20 @@ import (
 	"sync"
 
 	"github.com/MortalArena/Musketeers/pkg/agent"
-	"github.com/MortalArena/Musketeers/pkg/session/core"
+	"github.com/MortalArena/Musketeers/pkg/orchestrator"
 	"go.uber.org/zap"
 )
 
-// AgentSessionIntegration يربط بين AgentRegistry و UnifiedSessionManager
+// AgentSessionIntegration يربط بين AgentRegistry و orchestrator.SessionManager
 type AgentSessionIntegration struct {
 	registry *agent.AgentRegistry
-	manager  *core.UnifiedSessionManager
+	manager  *orchestrator.SessionManager
 	logger   *zap.Logger
 	mu       sync.RWMutex
 }
 
 // NewAgentSessionIntegration ينشئ تكامل جديد
-func NewAgentSessionIntegration(registry *agent.AgentRegistry, manager *core.UnifiedSessionManager, logger *zap.Logger) *AgentSessionIntegration {
+func NewAgentSessionIntegration(registry *agent.AgentRegistry, manager *orchestrator.SessionManager, logger *zap.Logger) *AgentSessionIntegration {
 	return &AgentSessionIntegration{
 		registry: registry,
 		manager:  manager,
@@ -111,7 +111,7 @@ func (asi *AgentSessionIntegration) RegisterAgentAsManagerInSession(sessionID, a
 	}
 
 	// تعيين الدور كمدير
-	err = asi.manager.AssignRole(sessionID, agentID, "manager")
+	err = asi.manager.AssignRoleSimple(sessionID, agentID, "manager")
 	if err != nil {
 		return fmt.Errorf("failed to assign manager role: %w", err)
 	}
@@ -352,7 +352,7 @@ func (asi *AgentSessionIntegration) RegisterHumanClientInSession(sessionID, user
 }
 
 // GetHumanClientsInSession يحصل على العملاء البشريين في جلسة
-func (asi *AgentSessionIntegration) GetHumanClientsInSession(sessionID string) ([]*core.HumanClientInfo, error) {
+func (asi *AgentSessionIntegration) GetHumanClientsInSession(sessionID string) ([]*orchestrator.HumanClientInfo, error) {
 	asi.mu.RLock()
 	defer asi.mu.RUnlock()
 

@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/MortalArena/Musketeers/pkg/eventbus"
+	"github.com/MortalArena/Musketeers/pkg/orchestrator"
 	"github.com/MortalArena/Musketeers/pkg/session"
-	sessioncore "github.com/MortalArena/Musketeers/pkg/session/core"
 	"github.com/sirupsen/logrus"
 	"go.uber.org/zap"
 )
@@ -21,7 +21,7 @@ func setupTestServer(t *testing.T) *Server {
 
 	zapLogger, _ := zap.NewProduction()
 
-	sessionManager := sessioncore.NewUnifiedSessionManager(zapLogger)
+	sessionManager := orchestrator.NewSessionManager(zapLogger)
 	eb := eventbus.NewEventBus()
 	bridgeManager := session.NewSessionBridgeManager(eb, zapLogger)
 

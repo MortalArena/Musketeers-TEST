@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/agent"
-	"github.com/MortalArena/Musketeers/pkg/session/core"
+	"github.com/MortalArena/Musketeers/pkg/orchestrator"
 	"go.uber.org/zap"
 )
 
 // SessionOrchestrator ينسق الجلسات والوكلاء
 type SessionOrchestrator struct {
-	sessionManager     *core.UnifiedSessionManager
+	sessionManager     *orchestrator.SessionManager
 	agentRegistry      *agent.AgentRegistry
 	agentIntegration   *AgentSessionIntegration
 	instanceManager    *InstanceSessionIntegration
@@ -26,7 +26,7 @@ type SessionOrchestrator struct {
 
 // NewSessionOrchestrator ينشئ منسق جلسات جديد
 func NewSessionOrchestrator(
-	sessionManager *core.UnifiedSessionManager,
+	sessionManager *orchestrator.SessionManager,
 	agentRegistry *agent.AgentRegistry,
 	agentIntegration *AgentSessionIntegration,
 	instanceManager *InstanceSessionIntegration,
@@ -59,7 +59,7 @@ func (so *SessionOrchestrator) OrchestrateSession(ctx context.Context, sessionID
 	}
 
 	// التحقق من حالة الجلسة
-	if session.Status != core.SessionStatusActive {
+	if session.Status != "active" {
 		return fmt.Errorf("session is not active: %s", session.Status)
 	}
 
@@ -84,28 +84,28 @@ func (so *SessionOrchestrator) ManageSessionLifecycle(ctx context.Context, sessi
 
 	// إدارة دورة حياة الجلسة
 	switch session.Status {
-	case core.SessionStatusInitializing:
+	case "initializing":
 		// تهيئة الجلسة
 		err = so.sessionManager.ResumeSession(sessionID)
 		if err != nil {
 			return fmt.Errorf("failed to initialize session: %w", err)
 		}
-	case core.SessionStatusActive:
+	case "active":
 		// الجلسة نشطة
 		so.logger.Info("Session is active",
 			zap.String("session_id", sessionID),
 		)
-	case core.SessionStatusPaused:
+	case "paused":
 		// الجلسة متوقفة
 		so.logger.Info("Session is paused",
 			zap.String("session_id", sessionID),
 		)
-	case core.SessionStatusCompleted:
+	case "completed":
 		// الجلسة مكتملة
 		so.logger.Info("Session is completed",
 			zap.String("session_id", sessionID),
 		)
-	case core.SessionStatusFailed:
+	case "failed":
 		// الجلسة فشلت
 		so.logger.Error("Session failed",
 			zap.String("session_id", sessionID),
@@ -185,7 +185,7 @@ func (so *SessionOrchestrator) ExecuteTaskWithOrchestration(ctx context.Context,
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
-	if session.Status != core.SessionStatusActive {
+	if session.Status != "active" {
 		return nil, fmt.Errorf("session is not active: %s", session.Status)
 	}
 

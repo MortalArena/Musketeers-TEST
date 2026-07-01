@@ -1,22 +1,76 @@
 package providers
 
 import (
+	"context"
 	"sync"
+
+	"github.com/MortalArena/Musketeers/pkg/lifecycle"
 )
 
 // ProviderRegistry manages all available providers
 type ProviderRegistry struct {
 	providers map[ProviderType]Provider
 	mu        sync.RWMutex
+	lifecycle *lifecycle.LifecycleMixin
 }
 
 // NewProviderRegistry creates a new provider registry
 func NewProviderRegistry() *ProviderRegistry {
 	registry := &ProviderRegistry{
 		providers: make(map[ProviderType]Provider),
+		lifecycle: lifecycle.NewLifecycleMixin(),
 	}
 
 	return registry
+}
+
+// Start يبدأ ProviderRegistry
+func (r *ProviderRegistry) Start(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.lifecycle.SetStatus(lifecycle.LifecycleStatusStarting)
+	r.lifecycle.SetStatus(lifecycle.LifecycleStatusRunning)
+	return nil
+}
+
+// Stop يوقف ProviderRegistry
+func (r *ProviderRegistry) Stop(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.lifecycle.SetStatus(lifecycle.LifecycleStatusStopping)
+	r.lifecycle.SetStatus(lifecycle.LifecycleStatusStopped)
+	return nil
+}
+
+// Close يغلق ProviderRegistry
+func (r *ProviderRegistry) Close() error {
+	return r.Stop(r.lifecycle.Context())
+}
+
+// Shutdown يوقف ProviderRegistry بشكل آمن
+func (r *ProviderRegistry) Shutdown(ctx context.Context) error {
+	return r.Stop(ctx)
+}
+
+// Cancel يلغي العمليات الجارية
+func (r *ProviderRegistry) Cancel() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.lifecycle.CancelContext()
+	return nil
+}
+
+// IsRunning يتحقق مما إذا كان يعمل
+func (r *ProviderRegistry) IsRunning() bool {
+	return r.lifecycle.IsRunningMixin()
+}
+
+// Status يرجع الحالة
+func (r *ProviderRegistry) Status() lifecycle.LifecycleStatus {
+	return r.lifecycle.GetStatus()
 }
 
 // Register registers a provider with the given type
