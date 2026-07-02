@@ -174,9 +174,18 @@ func main() {
 	// ============================================================
 	// 5. ApplicationRuntime - Composition Root
 	// ============================================================
+	// إنشاء ProviderRegistry لجميع المزودين المدمجين
+	// يجب أن يتم قبل Build() لضمان حقن الاعتماديات الصحيحة
+	providerRegistry := builtin.NewRegistry()
+	log.Info("Provider registry created with all builtin providers (AIInterface)")
+
 	// إنشاء ApplicationRuntime
 	zapLogger := zap.NewNop()
 	appRuntime := pkgRuntime.NewApplicationRuntime(zapLogger)
+
+	// حقن ProviderRegistry في ApplicationRuntime قبل Build()
+	appRuntime.SetProviderRegistry(providerRegistry)
+	log.Info("ProviderRegistry injected into ApplicationRuntime before Build()")
 
 	// بناء جميع المكونات
 	if err := appRuntime.Build(); err != nil {
@@ -452,6 +461,17 @@ func main() {
 	orchestratorEngine.SetSessionContainer(sessionContainer) // [FIX] ربط SessionContainer لتفعيل RegisterAgentFromUnified
 	orchestratorEngine.SetConnector(conn)
 	orchestratorEngine.SetDelegationManager(delegationManager)
+
+	// [DELEGATION] إنشاء TaskDelegator لتوزيع المهام بين الوكلاء (موديل + خارجي)
+	agentPool := unifiedAgent.GetAgentPool()
+	if agentPool != nil {
+		orchestratorEngine.SetAgentPool(agentPool)
+		sessionEventBus := unifiedAgent.GetSessionEventBus()
+		taskDelegator := orchestrator.NewTaskDelegator(agentPool, sessionEventBus, zapLogger)
+		orchestratorEngine.SetTaskDelegator(taskDelegator)
+		log.Info("TaskDelegator created and wired to OrchestratorEngine")
+	}
+
 	if err := orchestratorEngine.Start(ctx); err != nil {
 		log.WithError(err).Warn("Failed to start orchestrator engine")
 	} else {
@@ -459,27 +479,86 @@ func main() {
 	}
 	defer orchestratorEngine.Stop(ctx)
 
-	// [FIX] تسجيل الوكلاء المكتشفة من AutoDiscovery في AgentRegistry أولاً
-	// ثم تسجيلهم عبر OrchestratorEngine لإضافتهم إلى SessionContainer
-	if len(discoveredAgents) > 0 {
-		log.Info("تسجيل الوكلاء المكتشفة في AgentRegistry ثم عبر OrchestratorEngine")
-		for _, agent := range discoveredAgents {
-			// إنشاء ProviderAdapter للوكيل المكتشف
-			adapter := adapters.NewProviderAdapter(
-				agent.ID,
-				agent.Name,
-				agent.AgentType,
-				"", // provider - سيتم تعيينه لاحقاً
-				"", // model - سيتم تعيينه لاحقاً
-			)
+	// [EXTERNAL BRIDGE] تسجيل الوكلاء المكتشفة من AutoDiscovery كوكلاء خارجيين
+	// كل وكيل خارجي (CLI/IDE/Desktop) يُسجل في AgentPool عبر ExternalBridgeManager
+	// ويربط بـ SessionEventBus لتدفق الأحداث
+	externalBridgeManager := unifiedAgent.GetExternalBridgeManager()
+	if externalBridgeManager == nil {
+		log.Warn("ExternalBridgeManager not available — external agents will not be registered")
+	} else if len(discoveredAgents) > 0 {
+		log.Info("تسجيل الوكلاء المكتشفة كوكلاء خارجيين عبر ExternalBridgeManager")
+		for _, discovered := range discoveredAgents {
+			var adapter agent.UnifiedAgent
+			switch discovered.Type {
+			case "ide":
+				ideType := "vscode"
+				if meta, ok := discovered.Metadata["ide_type"].(string); ok {
+					ideType = meta
+				}
+				adapter = adapters.NewIDEAdapter(&adapters.IDEConfig{
+					IDEType:     ideType,
+					Name:        discovered.Name,
+					ProjectPath: "./",
+				})
+			case "cli":
+				adapter = adapters.NewCLIAdapter(&adapters.CLIConfig{
+					Command: discovered.Executable,
+					Args:    []string{},
+					Name:    discovered.Name,
+				})
+			case "desktop":
+				appPath := discovered.Executable
+				if meta, ok := discovered.Metadata["path"].(string); ok {
+					appPath = meta
+				}
+				deskAdapter, err := adapters.NewDesktopAppAdapter(&adapters.DesktopAppConfig{
+					Name:              discovered.Name,
+					Executable:        appPath,
+					CommunicationMode: "websocket",
+					AutoStart:         false,
+				}, zapLogger)
+				if err != nil {
+					log.WithError(err).Warnf("فشل إنشاء Desktop adapter للوكيل %s", discovered.ID)
+					continue
+				}
+				adapter = deskAdapter
+			default:
+				adapter = adapters.NewProviderAdapter(
+					discovered.ID,
+					discovered.Name,
+					discovered.AgentType,
+					"", "",
+				)
+			}
 
-			// تسجيل في AgentRegistry
-			if err := agentRegistry.Register(adapter, nil); err != nil {
-				log.WithError(err).Warnf("فشل تسجيل الوكيل %s في AgentRegistry", agent.ID)
+			if adapter == nil {
 				continue
 			}
 
-			log.WithField("agent_id", agent.ID).Info("تم تسجيل الوكيل في AgentRegistry")
+			// تسجيل في AgentRegistry
+			if err := agentRegistry.Register(adapter, nil); err != nil {
+				log.WithError(err).Warnf("فشل تسجيل الوكيل %s في AgentRegistry", discovered.ID)
+				continue
+			}
+
+			// تسجيل في ExternalBridgeManager (ينشئ AgentInstance ويربط بـ SessionEventBus)
+			instance, err := externalBridgeManager.RegisterExternalAgent(adapter, "regular")
+			if err != nil {
+				log.WithError(err).Warnf("فشل تسجيل الوكيل الخارجي %s في ExternalBridgeManager", discovered.ID)
+				continue
+			}
+
+			// ربط ThinkingEngine بمكونات الجلسة (Memory, Skills, Journal, Tasks)
+			if agentPool := unifiedAgent.GetAgentPool(); agentPool != nil {
+				_ = agentPool.ConnectThinkingEngineToSession(instance.AgentID)
+			}
+
+			// ربط الوكيل بـ SessionEventBus لتدفق الأحداث
+			if err := externalBridgeManager.WireToEventBus(instance.AgentID); err != nil {
+				log.WithError(err).Warnf("فشل ربط الوكيل %s بـ SessionEventBus", discovered.ID)
+			}
+
+			log.WithField("agent_id", instance.AgentID).WithField("type", discovered.Type).Info("تم تسجيل الوكيل الخارجي كـ External Bridge Agent")
 		}
 	}
 
@@ -519,10 +598,6 @@ func main() {
 		}
 	}
 	log.WithField("agent_count", agentRegistry.GetCount()).Info("Agents registered in unified system, orchestrator, AgentPool, and assigned roles for planning")
-
-	// [FIX] Create Provider Registry for LLM providers
-	providerRegistry := builtin.NewRegistry()
-	log.Info("Provider registry created with all builtin providers (AIInterface)")
 
 	// ============================================================
 	// 10. AIInterface - LLM provider abstraction (ProviderRegistry + Router)
@@ -678,7 +753,7 @@ func main() {
 			}{
 				providerType: providers.ProviderMistral,
 				provider:     mistralProvider,
-				models:       []string{"mistral-large-latest", "mistral-medium", "mistral-small"},
+				models:       []string{"mistral-large-2512", "mistral-large-latest", "codestral-2508", "mistral-medium", "mistral-small"},
 			})
 		}
 	}
@@ -691,7 +766,7 @@ func main() {
 			}{
 				providerType: providers.ProviderOpenRouter,
 				provider:     openrouterProvider,
-				models:       []string{"anthropic/claude-3.5-sonnet", "openai/gpt-4o", "google/gemini-pro"},
+				models:       []string{"mistralai/mistral-large-2512", "anthropic/claude-3.5-sonnet", "openai/gpt-4o", "google/gemini-pro", "openrouter/owl-alpha"},
 			})
 		}
 	}
@@ -802,6 +877,13 @@ func main() {
 			}
 		}
 		log.WithField("agent_count", agentRegistry.GetCount()).Info("تم تسجيل الوكلاء الحقيقيين في UnifiedAgent و AgentPool وتعيين الأدوار")
+
+		// [RUNTIME AGENTS] ربط ThinkingEngine لكل وكيل بمكونات الجلسة (Memory, Skills, Journal, Tasks)
+		agentPool := unifiedAgent.GetAgentPool()
+		if agentPool != nil {
+			agentPool.ConnectAllToSession()
+			log.Info("All Runtime Agents connected to shared session components (Memory, Skills, Journal, Tasks)")
+		}
 	}
 
 	// [FIX] Create Smart Router for intelligent model selection
@@ -848,6 +930,26 @@ func main() {
 		}
 	} else {
 		log.Warn("AgentPool not found in UnifiedAgent - cannot link providers")
+	}
+
+	// [SESSION-CENTRIC] إنشاء الجلسة الافتراضية مع مدير جلسة حقيقي
+	if sessionManagerAgentID != "" {
+		// تجميع معرفات وكلاء الموديلات كوكلاء جلسة
+		modelAgentIDs := make([]string, 0)
+		for _, agentObj := range agentRegistry.ListAll() {
+			info := agentObj.GetInfo()
+			if info.Type == pkgAgent.AgentTypeAPI {
+				modelAgentIDs = append(modelAgentIDs, info.ID)
+			}
+		}
+		defaultSession, err := sessionManager.CreateSession(ctx, "Default Session", kp.DID, sessionManagerAgentID, modelAgentIDs)
+		if err != nil {
+			log.WithError(err).Warn("Failed to create default session")
+		} else {
+			log.WithField("session_id", defaultSession.ID).WithField("manager", sessionManagerAgentID).WithField("agents", len(modelAgentIDs)).Info("Default session created with real manager agent")
+		}
+	} else {
+		log.Warn("No session manager agent ID available - session not created")
 	}
 
 	// [IMPORTANT] Default provider for ThinkingEngine will be set dynamically from Dashboard
@@ -1255,6 +1357,7 @@ func main() {
 		OwnerDID:           kp.DID,
 		AgentRegistry:      agentRegistry,
 		UnifiedAgent:       unifiedAgent,
+		ExternalBridgeMgr:  externalBridgeManager,
 		OrchestratorEngine: orchestratorEngine,
 		SessionContainer:   sessionContainer,
 	})
@@ -1286,7 +1389,7 @@ func main() {
 	}()
 	log.WithField("port", *apiPort).Info("API Server started")
 
-	// [TEST] اختبار Thinking Engine - تنفيذ مهمة بسيطة
+	// [TEST] اختبار Thinking Engine - تنفيذ مهمة بسيطة باستخدام وكيل مدير الجلسة
 	log.Info("Testing Thinking Engine with a simple task...")
 	testCtx, testCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer testCancel()
@@ -1294,29 +1397,22 @@ func main() {
 	testTask := "What is 2 + 2?"
 	log.WithField("task", testTask).Info("Executing test task")
 
-	// الحصول على أول وكيل من AgentPool
-	agentPool := unifiedAgent.GetAgentPool()
-	if agentPool != nil {
-		agents := agentPool.ListAgents()
-		if len(agents) > 0 {
-			// الحصول على ThinkingEngine للوكيل الأول
-			te, err := agentPool.GetOrCreateThinkingEngine(agents[0].AgentID)
-			if err != nil {
-				log.WithError(err).Warn("Failed to get ThinkingEngine for test")
-			} else {
-				// تنفيذ مهمة بسيطة
-				result, err := te.AnalyzeTask(testCtx, testTask)
-				if err != nil {
-					log.WithError(err).Warn("ThinkingEngine test failed")
-				} else {
-					log.WithField("result", result).Info("ThinkingEngine test succeeded")
-				}
-			}
+	// استخدام وكيل مدير الجلسة (أول وكيل حقيقي من الموديلات)
+	agentPool = unifiedAgent.GetAgentPool()
+	if agentPool != nil && sessionManagerAgentID != "" {
+		te, err := agentPool.GetOrCreateThinkingEngine(sessionManagerAgentID)
+		if err != nil {
+			log.WithError(err).Warn("Failed to get ThinkingEngine for session manager agent")
 		} else {
-			log.Warn("No agents in AgentPool for testing")
+			result, err := te.AnalyzeTask(testCtx, testTask)
+			if err != nil {
+				log.WithError(err).Warn("ThinkingEngine test failed")
+			} else {
+				log.WithField("result", result).Info("ThinkingEngine test succeeded")
+			}
 		}
 	} else {
-		log.Warn("AgentPool not initialized for testing")
+		log.Warn("AgentPool or sessionManagerAgentID not available for testing")
 	}
 
 	// بدء واجهة Studio

@@ -37,10 +37,19 @@ agent-data/
 studio-data/
 agent-data-*
 seed-data-*
+studio-data-*/
+studio-test-*/
+.musketeers/
 
 # Logs
 *.log
 logs/
+*.err
+*.txt
+run.err
+run_log.txt
+server.err
+studio-*.txt
 
 # Environment files
 .env

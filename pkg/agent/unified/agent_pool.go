@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/agent"
+	"github.com/MortalArena/Musketeers/pkg/agent/adapters"
 	"github.com/MortalArena/Musketeers/pkg/agent/thinking"
 	"github.com/MortalArena/Musketeers/pkg/agent/tools"
 	"github.com/MortalArena/Musketeers/pkg/lifecycle"
@@ -71,6 +72,7 @@ type AgentPool struct {
 type AgentInstance struct {
 	AgentID   string
 	AgentType string
+	Role      string // manager, assistant, regular
 	Adapter   agent.UnifiedAgent // الـ adapter الأصلي (CLI/API/IDE/Browser)
 
 	mu sync.RWMutex
@@ -81,6 +83,10 @@ type AgentInstance struct {
 
 	// ToolExecutor — له صلاحياته هو (مش صلاحيات مدير الجلسة)
 	toolExecutor *tools.ToolExecutor
+
+	// Runtime info — الربط الفعلي بين Provider و Model و ThinkingEngine
+	runtimeProvider providers.Provider
+	runtimeModel    string
 
 	// حالة الوكيل
 	status      PoolAgentStatus
@@ -201,8 +207,10 @@ func (ap *AgentPool) RegisterAgent(adapter agent.UnifiedAgent, role tools.AgentR
 	}
 
 	agentID := info.ID
-	if _, exists := ap.instances[agentID]; exists {
-		return nil, fmt.Errorf("agent already registered in pool: %s", agentID)
+	if existing, exists := ap.instances[agentID]; exists {
+		ap.logger.Debug("Agent already registered in pool, returning existing instance",
+			zap.String("agent_id", agentID))
+		return existing, nil
 	}
 
 	if len(ap.instances) >= ap.config.MaxAgents {
@@ -220,6 +228,7 @@ func (ap *AgentPool) RegisterAgent(adapter agent.UnifiedAgent, role tools.AgentR
 	instance := &AgentInstance{
 		AgentID:      agentID,
 		AgentType:    string(info.Type),
+		Role:         string(role),
 		Adapter:      adapter,
 		status:       PoolAgentStatusRegistered,
 		statusSince:  time.Now(),
@@ -271,10 +280,36 @@ func (ap *AgentPool) ListAgents() []*AgentInstance {
 	return agents
 }
 
+// HasThinkingEngine يتحقق مما إذا كان ThinkingEngine موجوداً دون إنشائه
+// [SAFETY] لا يؤسس أي موارد — آمن للاستعلام من API
+func (ap *AgentPool) HasThinkingEngine(agentID string) error {
+	ap.mu.RLock()
+	instance, exists := ap.instances[agentID]
+	ap.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("agent not found: %s", agentID)
+	}
+	instance.mu.RLock()
+	init := instance.thinkingEngineInit
+	instance.mu.RUnlock()
+	if !init {
+		return fmt.Errorf("thinking engine not initialized for agent: %s", agentID)
+	}
+	return nil
+}
+
 // GetOrCreateThinkingEngine يحصل على ThinkingEngine للوكيل (lazy init)
 // [SAFETY] القفل على ap.mu محتفظ به أثناء الحصول على instance.mu
 // لمنع سباق TOCTOU مع RemoveAgent/ParkAgent
 func (ap *AgentPool) GetOrCreateThinkingEngine(agentID string) (*thinking.ThinkingEngine, error) {
+	// [DEADLOCK FIX] countActive يمسك RLock على كل instance.mu
+	// لذا يجب استدعاؤه قبل قفل instance الحالي لتجنب self-deadlock
+	activeCount := ap.countActive()
+	if activeCount >= ap.config.MaxActiveAgents {
+		return nil, fmt.Errorf("max active agents reached: %d", ap.config.MaxActiveAgents)
+	}
+	preInitCount := activeCount // للاستخدام في log بعد init (حيث instance.mu ما زال مقفولاً)
+
 	ap.mu.Lock()
 	instance, exists := ap.instances[agentID]
 	if !exists {
@@ -308,9 +343,22 @@ func (ap *AgentPool) GetOrCreateThinkingEngine(agentID string) (*thinking.Thinki
 
 	ap.logger.Info("تم تهيئة ThinkingEngine للوكيل",
 		zap.String("agent_id", agentID),
-		zap.Int("active_agents", ap.countActive()))
+		zap.Int("active_agents", preInitCount+1))
 
 	return instance.thinkingEngine, nil
+}
+
+// isExternalAgentType يتحقق مما إذا كان الوكيل من نوع خارجي (CLI/IDE/Browser/Custom)
+// هذه الوكلاء لديهم ذكاء خاص بهم ولا يحتاجون إلى Provider في ThinkingEngine
+func IsExternalAgentType(agentType string) bool {
+	switch agentType {
+	case string(agent.AgentTypeCLI),
+		string(agent.AgentTypeIDE),
+		string(agent.AgentTypeBrowser),
+		string(agent.AgentTypeCustom):
+		return true
+	}
+	return false
 }
 
 // initThinkingEngine يهيئ ThinkingEngine للـ AgentInstance
@@ -320,10 +368,8 @@ func (ap *AgentPool) initThinkingEngine(instance *AgentInstance) error {
 		return nil
 	}
 
-	// [SAFETY] فرض الحد الأقصى للوكلاء النشطين
-	if ap.countActive() >= ap.config.MaxActiveAgents {
-		return fmt.Errorf("max active agents reached: %d", ap.config.MaxActiveAgents)
-	}
+	// [SAFETY] فرض الحد الأقصى للوكلاء النشطين — يتم التحقق منه قبل instance.mu.Lock في GetOrCreateThinkingEngine
+	// لا نستدعي countActive هنا لأنه يمسك RLock على instance.mu ويسبب self-deadlock
 
 	// إنشاء ThinkingEngine جديد — مستقل تماماً لكل وكيل
 	te := thinking.NewThinkingEngine(ap.sessionID, instance.AgentID, ap.logger)
@@ -336,16 +382,48 @@ func (ap *AgentPool) initThinkingEngine(instance *AgentInstance) error {
 		te.SetWorkflowEngine(ap.sessionContainer.Workflow)
 	}
 
-	// [FIX] ربط Provider و Model بـ ThinkingEngine لتنفيذ المهام الفعلي
-	// هذا ضروري لكي يتمكن كل وكيل من استخدام الموديلات
-	if ap.defaultProvider != nil && ap.defaultModelID != "" {
+	// [EXTERNAL BRIDGE] الوكلاء الخارجيون (CLI/IDE/Browser) لديهم ذكاء خاص بهم
+	// نتخطى تعيين Provider لأنهم لا يحتاجون ThinkingEngine للـ LLM
+	if IsExternalAgentType(instance.AgentType) {
+		instance.runtimeProvider = nil
+		instance.runtimeModel = "external"
+		ap.logger.Info("External agent — ThinkingEngine skips provider setup (agent has its own intelligence)",
+			zap.String("agent_id", instance.AgentID),
+			zap.String("type", instance.AgentType))
+		instance.thinkingEngine = te
+		instance.thinkingEngineInit = true
+		return nil
+	}
+
+	// [RUNTIME AGENT] استخدام Provider و Model الخاصين بالوكيل إن أمكن
+	// لكل وكيل من نوع ProviderAdapter مزود وموديل خاص به (مثلاً agent-1-mistral له Mistral)
+	// هذا هو العمود الفقري لـ Provider → Model → Runtime Agent → ThinkingEngine
+	providerSet := false
+	if pa, ok := instance.Adapter.(*adapters.ProviderAdapter); ok {
+		agentProvider, agentModel := pa.GetProvider()
+		if agentProvider != nil && agentModel != "" {
+			te.SetProvider(agentProvider, agentModel)
+			providerSet = true
+			instance.runtimeProvider = agentProvider
+			instance.runtimeModel = agentModel
+			ap.logger.Info("Runtime Agent linked to its own Provider+Model",
+				zap.String("agent_id", instance.AgentID),
+				zap.String("provider", string(agentProvider.Type())),
+				zap.String("model", agentModel))
+		}
+	}
+	if !providerSet && ap.defaultProvider != nil && ap.defaultModelID != "" {
 		te.SetProvider(ap.defaultProvider, ap.defaultModelID)
-		ap.logger.Info("Provider and model set for ThinkingEngine",
+		providerSet = true
+		instance.runtimeProvider = ap.defaultProvider
+		instance.runtimeModel = ap.defaultModelID
+		ap.logger.Info("Pool default provider set for non-provider agent's ThinkingEngine",
 			zap.String("agent_id", instance.AgentID),
 			zap.String("provider", string(ap.defaultProvider.Type())),
 			zap.String("model", ap.defaultModelID))
-	} else {
-		ap.logger.Warn("No default provider or model set, ThinkingEngine will need manual provider configuration",
+	}
+	if !providerSet {
+		ap.logger.Warn("No provider available for ThinkingEngine — agent cannot execute LLM tasks",
 			zap.String("agent_id", instance.AgentID))
 	}
 
@@ -538,6 +616,95 @@ func (ap *AgentPool) RemoveAgent(agentID string) error {
 		zap.Int("remaining", len(ap.instances)))
 
 	return nil
+}
+
+// GetRuntimeProvider يرجع Provider المرتبط فعلياً بـ ThinkingEngine الخاص بالوكيل
+func (ai *AgentInstance) GetRuntimeProvider() (providers.Provider, string) {
+	ai.mu.RLock()
+	defer ai.mu.RUnlock()
+	return ai.runtimeProvider, ai.runtimeModel
+}
+
+// GetRole يرجع دور الوكيل
+func (ai *AgentInstance) GetRole() string {
+	ai.mu.RLock()
+	defer ai.mu.RUnlock()
+	return ai.Role
+}
+
+// GetThinkingEngineInit يرجع حالة تهيئة ThinkingEngine
+func (ai *AgentInstance) GetThinkingEngineInit() bool {
+	ai.mu.RLock()
+	defer ai.mu.RUnlock()
+	return ai.thinkingEngineInit
+}
+
+// GetTaskStats يرجع إحصائيات المهام
+func (ai *AgentInstance) GetTaskStats() (int, int, int) {
+	ai.mu.RLock()
+	defer ai.mu.RUnlock()
+	return ai.totalTasks, ai.successTasks, ai.failedTasks
+}
+
+// RuntimeComponentsState يعيد حالة مكونات Runtime للوكيل
+type RuntimeComponentsState struct {
+	ThinkingEngine bool   `json:"thinking_engine"`
+	Provider       bool   `json:"provider"`
+	Workflow       bool   `json:"workflow"`
+	Memory         bool   `json:"memory"`
+	Skills         bool   `json:"skills"`
+	Journal        bool   `json:"journal"`
+	Tasks          bool   `json:"tasks"`
+	ToolExecutor   bool   `json:"tool_executor"`
+	ProviderName   string `json:"provider_name,omitempty"`
+	ModelName      string `json:"model_name,omitempty"`
+}
+
+// GetRuntimeComponents يعيد حالة جميع مكونات Runtime للوكيل
+func (ai *AgentInstance) GetRuntimeComponents(ap *AgentPool) *RuntimeComponentsState {
+	ai.mu.RLock()
+	defer ai.mu.RUnlock()
+
+	state := &RuntimeComponentsState{
+		ThinkingEngine: ai.thinkingEngineInit && ai.thinkingEngine != nil,
+		Provider:       ai.runtimeProvider != nil,
+		Workflow:       false,
+		Memory:         false,
+		Skills:         false,
+		Journal:        false,
+		Tasks:          false,
+		ToolExecutor:   ai.toolExecutor != nil,
+	}
+
+	if ai.runtimeProvider != nil {
+		state.ProviderName = string(ai.runtimeProvider.Type())
+	}
+	state.ModelName = ai.runtimeModel
+
+	// Check session component connections via ThinkingEngine adaptors
+	if ai.thinkingEngine != nil && ai.thinkingEngineInit {
+		state.Workflow = ai.thinkingEngine.HasWorkflowEngine()
+		state.Memory = ai.thinkingEngine.HasCollectiveMemory()
+		state.Skills = ai.thinkingEngine.HasSkillsManager()
+		state.Journal = ai.thinkingEngine.HasSessionJournal()
+		state.Tasks = ai.thinkingEngine.HasTaskManager()
+	}
+
+	return state
+}
+
+// GetSessionID يرجع معرف الجلسة المرتبطة بـ AgentPool
+func (ap *AgentPool) GetSessionID() string {
+	ap.mu.RLock()
+	defer ap.mu.RUnlock()
+	return ap.sessionID
+}
+
+// GetSessionContainer يرجع SessionContainer المرتبط بـ AgentPool
+func (ap *AgentPool) GetSessionContainer() *session.SessionContainer {
+	ap.mu.RLock()
+	defer ap.mu.RUnlock()
+	return ap.sessionContainer
 }
 
 // GetToolExecutor يحصل على ToolExecutor للوكيل

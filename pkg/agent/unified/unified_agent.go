@@ -96,6 +96,9 @@ type UnifiedAgent struct {
 	// [NEW] AgentPool يدير جميع الوكلاء في الجلسة — كل وكيل له ThinkingEngine + أدواته
 	agentPool *AgentPool
 
+	// [EXTERNAL BRIDGE] ExternalBridgeManager يدير الوكلاء الخارجيين (CLI/IDE/Browser)
+	externalBridgeManager *ExternalBridgeManager
+
 	// Metrics for performance monitoring
 	metrics *metrics.Metrics
 
@@ -185,6 +188,9 @@ func NewUnifiedAgent(sessionID, agentID string, db *badger.DB, logger *zap.Logge
 	poolConfig := DefaultAgentPoolConfig()
 	ua.agentPool = NewAgentPool(sessionID, poolConfig, nil, logger)
 	ua.sessionManager.SetAgentPool(ua.agentPool)
+
+	// إنشاء ExternalBridgeManager للوكلاء الخارجيين (CLI/IDE/Browser)
+	ua.externalBridgeManager = NewExternalBridgeManager(ua.agentPool, ua.sessionEventBus, logger)
 
 	// إنشاء WiringLayer للربط التلقائي للـ Adapters
 	ua.wiringLayer = wiring.NewWiringLayer(sessionID, agentID, logger)
@@ -886,6 +892,20 @@ func (ua *UnifiedAgent) GetAgentPool() *AgentPool {
 	ua.mu.RLock()
 	defer ua.mu.RUnlock()
 	return ua.agentPool
+}
+
+// GetExternalBridgeManager يعيد مرجع ExternalBridgeManager (للاستخدام من main.go)
+func (ua *UnifiedAgent) GetExternalBridgeManager() *ExternalBridgeManager {
+	ua.mu.RLock()
+	defer ua.mu.RUnlock()
+	return ua.externalBridgeManager
+}
+
+// GetSessionEventBus يعيد مرجع SessionEventBus (للاستخدام من main.go)
+func (ua *UnifiedAgent) GetSessionEventBus() *SessionEventBus {
+	ua.mu.RLock()
+	defer ua.mu.RUnlock()
+	return ua.sessionEventBus
 }
 
 // SetRealSessionContainer يضبط SessionContainer الحقيقي (من main.go) لاستخدامه بدلاً من إنشاء واحد جديد

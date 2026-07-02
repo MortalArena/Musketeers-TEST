@@ -24,6 +24,7 @@ import (
 	"github.com/MortalArena/Musketeers/pkg/orchestrator"
 	"github.com/MortalArena/Musketeers/pkg/protocol"
 	"github.com/MortalArena/Musketeers/pkg/providers"
+	pkgRuntime "github.com/MortalArena/Musketeers/pkg/runtime"
 	"github.com/MortalArena/Musketeers/pkg/security"
 	"github.com/MortalArena/Musketeers/pkg/session"
 	"github.com/google/uuid"
@@ -124,13 +125,15 @@ type Server struct {
 	eventBus           *eventbus.EventBus
 
 	// Shared runtime (wired from cmd/studio via UseRuntime)
-	providerRegistry   *providers.ProviderRegistry
-	apiKeyManager      *providers.APIKeyManager
-	ownerDID           string
-	agentRegistry      *agent.AgentRegistry
-	unifiedAgent       *unified.UnifiedAgent
-	orchestratorEngine *orchestrator.OrchestratorEngine
-	sessionContainer   *session.SessionContainer
+	providerRegistry    *providers.ProviderRegistry
+	apiKeyManager       *providers.APIKeyManager
+	ownerDID            string
+	agentRegistry       *agent.AgentRegistry
+	unifiedAgent        *unified.UnifiedAgent
+	externalBridgeMgr   *unified.ExternalBridgeManager
+	orchestratorEngine  *orchestrator.OrchestratorEngine
+	sessionContainer    *session.SessionContainer
+	applicationRuntime  *pkgRuntime.ApplicationRuntime
 
 	// Provider configuration storage (dashboard view + connection metadata)
 	providers   map[string]ProviderConfig // providerID -> ProviderConfig
@@ -235,6 +238,7 @@ func NewServerWithTLS(n *node.Node, port int, log *logrus.Logger, tlsEnabled boo
 	mux.HandleFunc("/api/mcp/tools", s.handleMCPTools)
 	mux.HandleFunc("/api/mcp/tools/", s.handleMCPToolByID)
 	mux.HandleFunc("/api/ws", s.handleWebSocket)
+	mux.HandleFunc("/api/stream", s.handleStream)
 
 	// Dashboard APIs
 	mux.HandleFunc("/api/providers", s.handleProviders)
@@ -252,6 +256,22 @@ func NewServerWithTLS(n *node.Node, port int, log *logrus.Logger, tlsEnabled boo
 	mux.HandleFunc("/api/test-provider", s.handleTestProvider)
 	mux.HandleFunc("/api/chat", s.handleDirectChat)
 	mux.HandleFunc("/api/ide/command", s.handleIDECommand)
+
+	// Runtime Dashboard APIs (live state from runtime objects)
+	mux.HandleFunc("/api/runtime/ping", s.handleRuntimePing)
+	mux.HandleFunc("/api/runtime/debug", s.handleRuntimeDebug)
+	mux.HandleFunc("/api/runtime/status", s.handleRuntimeStatus)
+	mux.HandleFunc("/api/runtime/agents", s.handleRuntimeAgents)
+	mux.HandleFunc("/api/runtime/thinking-engine", s.handleRuntimeThinkingEngine)
+	mux.HandleFunc("/api/runtime/execute", s.handleRuntimeExecute)
+	mux.HandleFunc("/api/runtime/events", s.handleRuntimeEvents)
+	mux.HandleFunc("/api/runtime/delegations", s.handleRuntimeDelegations)
+	mux.HandleFunc("/api/runtime/session", s.handleRuntimeSession)
+	mux.HandleFunc("/api/runtime/memory", s.handleRuntimeMemory)
+	mux.HandleFunc("/api/runtime/memory/detail", s.handleRuntimeMemoryDetail)
+	mux.HandleFunc("/api/runtime/providers", s.handleRuntimeProviders)
+	mux.HandleFunc("/api/runtime/workflows", s.handleRuntimeWorkflows)
+	mux.HandleFunc("/api/runtime/bridges", s.handleRuntimeBridges)
 
 	// Temporarily disable auth middleware for testing
 	handler := s.corsMiddleware(security.RateLimitMiddleware(rateLimiter)(mux))
@@ -844,6 +864,11 @@ func (s *Server) handleChannelsMessages(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Redirect to dashboard with token if not present in URL
+	if r.URL.Query().Get("token") == "" {
+		http.Redirect(w, r, "/dashboard?token="+s.token, http.StatusFound)
+		return
+	}
 	// Bootstrap local API token so dashboard API calls work without manual ?token= copy.
 	bootstrap := fmt.Sprintf(
 		`<script>if(!localStorage.getItem('api_token')){localStorage.setItem('api_token',%q);}</script>`,
@@ -883,7 +908,14 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			} `json:"worker_agents"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "JSON غير صالح", http.StatusBadRequest)
+			errorMsg := fmt.Sprintf("Invalid JSON request body: %v. Please ensure your request is valid JSON.", err)
+			http.Error(w, errorMsg, http.StatusBadRequest)
+			return
+		}
+
+		if req.Name == "" {
+			errorMsg := "Session name is required. Please provide a 'name' field in your request."
+			http.Error(w, errorMsg, http.StatusBadRequest)
 			return
 		}
 
@@ -900,8 +932,16 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		session, err := s.sessionManager.CreateSession(ctx, req.Name, req.OwnerDID, req.ManagerAgentID, req.AssistantAgents)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			errorMsg := fmt.Sprintf("Failed to create session: %v. Please check your request parameters and try again.", err)
+			http.Error(w, errorMsg, http.StatusBadRequest)
 			return
+		}
+
+		// [FIX] إنشاء SessionContainer للجلسة الجديدة
+		if s.sessionContainer != nil {
+			// SessionContainer موجود بالفعل في main.go، نحتاج فقط لربط الجلسة به
+			// SessionContainer يدير جميع الجلسات، ليس لكل جلسة container منفصل
+			s.log.WithField("session_id", session.ID).Info("Session created, using shared SessionContainer")
 		}
 
 		// Register the manager agent with provider/model
@@ -931,63 +971,99 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// [AUTO] تسجيل جميع الوكلاء من AgentRegistry تلقائياً
-		if s.agentRegistry != nil {
-			for _, agentObj := range s.agentRegistry.ListAll() {
-				info := agentObj.GetInfo()
-				role := "assistant"
-				if info.Type == "manager" || info.ID == req.ManagerAgentID {
-					role = "manager"
+		// فقط إذا لم يحدد المستخدم موديل معين
+		if req.ManagerProvider == "" && req.ManagerModel == "" {
+			if s.agentRegistry != nil {
+				for _, agentObj := range s.agentRegistry.ListAll() {
+					info := agentObj.GetInfo()
+					role := "assistant"
+					if info.Type == "manager" || info.ID == req.ManagerAgentID {
+						role = "manager"
+					}
+					_ = s.sessionManager.RegisterAgentInstance(
+						session.ID, info.ID, "inst-"+info.ID,
+						"", "", info.Provider, info.Model,
+						"", "", role,
+					)
 				}
-				_ = s.sessionManager.RegisterAgentInstance(
-					session.ID, info.ID, "inst-"+info.ID,
-					"", "", info.Provider, info.Model,
-					"", "", role,
-				)
 			}
 		}
 
 		json.NewEncoder(w).Encode(session)
 
 	case http.MethodGet:
-		// [FIX] Read from UnifiedAgent.AgentPool instead of SessionContainer.state.Agents
-		// AgentPool contains the actual runtime agents with ThinkingEngine
+		// Read from UnifiedAgent.AgentPool for richest agent info
 		if s.unifiedAgent != nil {
 			agentPool := s.unifiedAgent.GetAgentPool()
 			if agentPool != nil {
-				// Get agents from AgentPool
 				agents := agentPool.ListAgents()
 
 				sessionList := make([]map[string]interface{}, 0, 1)
 				managerInfo := map[string]interface{}{}
 				workerList := make([]map[string]interface{}, 0)
 				agentIDs := make([]string, 0)
+				instances := make([]map[string]interface{}, 0)
+				managerAgentID := ""
+				managerFound := false
 
 				for _, instance := range agents {
-					// Get agent info from adapter
 					info := instance.Adapter.GetInfo()
 					if info == nil {
 						continue
 					}
 
-					// Skip internal agents (supervisor, etc.)
-					if info.Provider == "internal" || info.Model == "supervisor" {
-						continue
-					}
-
 					agentIDs = append(agentIDs, info.ID)
 
-					ainfo := map[string]interface{}{
-						"agent_id": info.ID,
-						"name":     info.Name,
-						"provider": info.Provider,
-						"model":    info.Model,
-						"role":     "assistant", // Default role
-						"status":   string(instance.GetStatus()),
+					role := instance.GetRole()
+					rp, rm := instance.GetRuntimeProvider()
+					rpStr := ""
+					if rp != nil {
+						rpStr = string(rp.Type())
 					}
-					if ainfo["role"] == "manager" {
+
+					ainfo := map[string]interface{}{
+						"agent_id":        info.ID,
+						"name":            info.Name,
+						"provider":        info.Provider,
+						"model":           info.Model,
+						"runtime_provider": rpStr,
+						"runtime_model":   rm,
+						"role":            role,
+						"is_external":     unified.IsExternalAgentType(instance.AgentType),
+						"status":          string(instance.GetStatus()),
+					}
+
+					instances = append(instances, ainfo)
+
+					if role == "manager" {
 						managerInfo = ainfo
+						managerAgentID = info.ID
+						managerFound = true
 					} else {
 						workerList = append(workerList, ainfo)
+					}
+				}
+
+				// If no manager found in pool, use first non-external agent as manager
+				if !managerFound {
+					for _, instance := range agents {
+						info := instance.Adapter.GetInfo()
+						if info == nil {
+							continue
+						}
+						if !unified.IsExternalAgentType(instance.AgentType) {
+							managerInfo = map[string]interface{}{
+								"agent_id":        info.ID,
+								"name":            info.Name,
+								"provider":        info.Provider,
+								"model":           info.Model,
+								"role":            "manager",
+								"status":          string(instance.GetStatus()),
+							}
+							managerAgentID = info.ID
+							_ = agentPool.SetAgentRole(info.ID, "manager")
+							break
+						}
 					}
 				}
 
@@ -1002,13 +1078,15 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 				}
 
 				sessionList = append(sessionList, map[string]interface{}{
-					"id":           sessionID,
-					"name":         sessionName,
-					"status":       sessionStatus,
-					"agents":       agentIDs,
-					"manager":      "",
-					"manager_info": managerInfo,
-					"workers":      workerList,
+					"id":               sessionID,
+					"name":             sessionName,
+					"status":           sessionStatus,
+					"agents":           agentIDs,
+					"manager_agent_id": managerAgentID,
+					"manager_info":     managerInfo,
+					"workers":          workerList,
+					"instances":        instances,
+					"agent_pool_count": len(agents),
 				})
 
 				json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1399,11 +1477,13 @@ func (s *Server) handleMessagesBySession(w http.ResponseWriter, r *http.Request)
 			Model   string `json:"model"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "JSON غير صالح", http.StatusBadRequest)
+			errorMsg := fmt.Sprintf("Invalid JSON request body: %v. Please ensure your request is valid JSON.", err)
+			http.Error(w, errorMsg, http.StatusBadRequest)
 			return
 		}
 		if req.Content == "" {
-			http.Error(w, "content مطلوب", http.StatusBadRequest)
+			errorMsg := "Message content is required. Please provide a 'content' field in your request."
+			http.Error(w, errorMsg, http.StatusBadRequest)
 			return
 		}
 		if req.Role == "" {
@@ -1425,16 +1505,33 @@ func (s *Server) handleMessagesBySession(w http.ResponseWriter, r *http.Request)
 		}
 		cm.AddMessage(userMsg)
 
-		// معالجة الرسالة عبر AI باستخدام UnifiedAgent
+		// معالجة الرسالة عبر AI باستخدام OrchestratorEngine
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 
 		var responseContent string
-		if s.unifiedAgent != nil {
-			// استخدام UnifiedAgent.ExecuteTask للمعالجة الكاملة عبر المحركات
+		if s.orchestratorEngine != nil {
+			// استخدام OrchestratorEngine.ExecuteTask للمعالجة الكاملة عبر المحركات
+			task := &agent.AgentTask{
+				ID:          fmt.Sprintf("task_%d", time.Now().UnixNano()),
+				Title:       req.Content,
+				Description: req.Content,
+				Inputs:      map[string]interface{}{"session_id": sessionID},
+				Timeout:     60 * time.Second,
+			}
+			result, err := s.orchestratorEngine.ExecuteTask(ctx, task)
+			if err != nil {
+				s.log.WithError(err).Warn("Failed to execute task via OrchestratorEngine, falling back to processChatWithAI")
+				// Fallback إلى processChatWithAI
+				responseContent = s.processChatWithAI(ctx, sessionID, req.Content, req.Model)
+			} else if result != nil {
+				responseContent = result.Output
+			}
+		} else if s.unifiedAgent != nil {
+			// Fallback إلى UnifiedAgent إذا لم يكن OrchestratorEngine متاح
 			result, err := s.unifiedAgent.ExecuteTask(ctx, req.Content)
 			if err != nil {
-				s.log.WithError(err).Warn("فشل تنفيذ المهمة عبر UnifiedAgent")
+				s.log.WithError(err).Warn("Failed to execute task via UnifiedAgent, falling back to processChatWithAI")
 				// Fallback إلى processChatWithAI
 				responseContent = s.processChatWithAI(ctx, sessionID, req.Content, req.Model)
 			} else if result != nil && result.Output != nil {
@@ -1447,7 +1544,7 @@ func (s *Server) handleMessagesBySession(w http.ResponseWriter, r *http.Request)
 				}
 			}
 		} else {
-			// Fallback إلى processChatWithAI إذا لم يكن UnifiedAgent متاح
+			// Fallback إلى processChatWithAI إذا لم يكن أي منهما متاح
 			responseContent = s.processChatWithAI(ctx, sessionID, req.Content, req.Model)
 		}
 
@@ -2947,25 +3044,91 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		"timestamp":    time.Now().Unix(),
 	}
 	conn.WriteJSON(welcomeMsg)
+}
 
-	// حلقة بسيطة للحفاظ على الاتصال
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	for {
-		select {
-		case <-ticker.C:
-			// إرسال ping للحفاظ على الاتصال
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				s.log.Errorf("فشل إرسال ping WebSocket: %v", err)
-				return
-			}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
 
-		case <-r.Context().Done():
-			s.log.Infof("تم إغلاق اتصال WebSocket للجلسة %s", sessionID)
+	var req struct {
+		Content   string `json:"content"`
+		SessionID string `json:"session_id"`
+		Model     string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fmt.Fprintf(w, "data: {\"error\": \"JSON غير صالح\"}\n\n")
+		flusher.Flush()
+		return
+	}
+
+	if req.Content == "" {
+		fmt.Fprintf(w, "data: {\"error\": \"content مطلوب\"}\n\n")
+		flusher.Flush()
+		return
+	}
+
+	if req.SessionID == "" {
+		fmt.Fprintf(w, "data: {\"error\": \"session_id مطلوب\"}\n\n")
+		flusher.Flush()
+		return
+	}
+
+	ctx := r.Context()
+
+	// إرسال حدث البدء
+	fmt.Fprintf(w, "data: {\"type\": \"start\", \"session_id\": \"%s\"}\n\n", req.SessionID)
+	flusher.Flush()
+
+	// معالجة الرسالة عبر OrchestratorEngine مع streaming
+	if s.orchestratorEngine != nil {
+		task := &agent.AgentTask{
+			ID:          fmt.Sprintf("task_%d", time.Now().UnixNano()),
+			Title:       req.Content,
+			Description: req.Content,
+			Inputs:      map[string]interface{}{"session_id": req.SessionID},
+			Timeout:     60 * time.Second,
+		}
+
+		// محاكاة streaming بإرسال أجزاء من النتيجة
+		result, err := s.orchestratorEngine.ExecuteTask(ctx, task)
+		if err != nil {
+			fmt.Fprintf(w, "data: {\"type\": \"error\", \"error\": \"%s\"}\n\n", err.Error())
+			flusher.Flush()
 			return
 		}
+
+		if result != nil && result.Output != "" {
+			// إرسال النتيجة كأجزاء
+			output := result.Output
+			chunkSize := 50
+			for i := 0; i < len(output); i += chunkSize {
+				end := i + chunkSize
+				if end > len(output) {
+					end = len(output)
+				}
+				chunk := output[i:end]
+				fmt.Fprintf(w, "data: {\"type\": \"chunk\", \"content\": \"%s\"}\n\n", chunk)
+				flusher.Flush()
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+	} else {
+		fmt.Fprintf(w, "data: {\"type\": \"error\", \"error\": \"OrchestratorEngine not available\"}\n\n")
+		flusher.Flush()
+		return
 	}
+
+	// إرسال حدث الانتهاء
+	fmt.Fprintf(w, "data: {\"type\": \"done\"}\n\n")
+	flusher.Flush()
 }
 
 // دوال MCP
@@ -3260,7 +3423,8 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		ctx := r.Context()
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
 		models := s.listModelsFromRuntime(ctx)
 		json.NewEncoder(w).Encode(models)
 	default:

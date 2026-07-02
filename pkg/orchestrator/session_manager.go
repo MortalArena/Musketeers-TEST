@@ -2,12 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/MortalArena/Musketeers/pkg/agent"
 	"github.com/MortalArena/Musketeers/pkg/eventbus"
+	"github.com/dgraph-io/badger/v4"
 	"go.uber.org/zap"
 )
 
@@ -18,6 +20,7 @@ type SessionManager struct {
 	EventBus      *eventbus.EventBus
 	ToolExecutor  interface{} // [WHY] منفذ الأدوات لتنفيذ المهام
 	Logger        *zap.Logger
+	db            *badger.DB // [FIX] إضافة BadgerDB للـ persistence
 	mu            sync.RWMutex
 }
 
@@ -93,6 +96,61 @@ func (sm *SessionManager) SetToolExecutor(te interface{}) {
 	sm.ToolExecutor = te
 }
 
+// SetDB يضبط قاعدة البيانات للـ persistence
+func (sm *SessionManager) SetDB(db *badger.DB) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.db = db
+}
+
+// saveSession يحفظ الجلسة في قاعدة البيانات
+func (sm *SessionManager) saveSession(session *SessionInfo) error {
+	if sm.db == nil {
+		return nil // لا يوجد persistence
+	}
+
+	data, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("failed to marshal session: %w", err)
+	}
+
+	key := []byte(fmt.Sprintf("session:%s", session.ID))
+	err = sm.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(key, data)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to save session to DB: %w", err)
+	}
+
+	return nil
+}
+
+// loadSession يحمل الجلسة من قاعدة البيانات
+func (sm *SessionManager) loadSession(sessionID string) (*SessionInfo, error) {
+	if sm.db == nil {
+		return nil, fmt.Errorf("no database configured")
+	}
+
+	key := []byte(fmt.Sprintf("session:%s", sessionID))
+	var session *SessionInfo
+
+	err := sm.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(key)
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			return json.Unmarshal(val, &session)
+		})
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to load session from DB: %w", err)
+	}
+
+	return session, nil
+}
+
 // CreateSession ينشئ جلسة جديدة
 func (sm *SessionManager) CreateSession(ctx context.Context, name, ownerDID string, managerAgentID string, assistantAgents []string) (*SessionInfo, error) {
 	sm.mu.Lock()
@@ -115,6 +173,11 @@ func (sm *SessionManager) CreateSession(ctx context.Context, name, ownerDID stri
 	}
 
 	sm.Sessions[sessionID] = session
+
+	// حفظ الجلسة في قاعدة البيانات
+	if err := sm.saveSession(session); err != nil {
+		sm.Logger.Warn("Failed to save session to database", zap.Error(err))
+	}
 
 	sm.Logger.Info("تم إنشاء جلسة جديدة",
 		zap.String("session_id", sessionID),

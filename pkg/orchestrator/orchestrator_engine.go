@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/MortalArena/Musketeers/pkg/agent"
+	"github.com/MortalArena/Musketeers/pkg/agent/tools"
 	"github.com/MortalArena/Musketeers/pkg/agent/unified"
 	"github.com/MortalArena/Musketeers/pkg/capability"
 	capgithub "github.com/MortalArena/Musketeers/pkg/capability/github"
@@ -99,7 +100,10 @@ type OrchestratorEngine struct {
 	policyEngine      *policy.Engine
 	unifiedAgent      *unified.UnifiedAgent     // مرجع للتكامل مع UnifiedAgent
 	sessionContainer  *session.SessionContainer // [NEW] مرجع للجلسة لمزامنة قدرات الوكلاء المحققة
+	sessionManager    *SessionManager           // [NEW] مدير الجلسات لتحميل جلسات محددة
 	delegationManager *DelegationManager        // [NEW] مدير التفويضات للتفويض الفعلي بين الوكلاء
+	agentPool         *unified.AgentPool        // [NEW] مصدر الحقيقة الوحيد للوكلاء الحقيقيين
+	taskDelegator     *TaskDelegator            // [DELEGATION] توزيع المهام بين الوكلاء
 	logger            *zap.Logger
 	mu                sync.RWMutex
 	running           bool
@@ -180,6 +184,37 @@ func (oe *OrchestratorEngine) SetDelegationManager(dm *DelegationManager) {
 	defer oe.mu.Unlock()
 	oe.delegationManager = dm
 	oe.logger.Info("تم ضبط DelegationManager في OrchestratorEngine")
+}
+
+// SetAgentPool يضبط AgentPool في OrchestratorEngine
+func (oe *OrchestratorEngine) SetAgentPool(ap *unified.AgentPool) {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+	oe.agentPool = ap
+	oe.logger.Info("تم ضبط AgentPool في OrchestratorEngine")
+}
+
+// SetTaskDelegator يضبط TaskDelegator في OrchestratorEngine
+func (oe *OrchestratorEngine) SetTaskDelegator(td *TaskDelegator) {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+	oe.taskDelegator = td
+	oe.logger.Info("تم ضبط TaskDelegator في OrchestratorEngine")
+}
+
+// GetTaskDelegator يعيد TaskDelegator المستخدم في OrchestratorEngine
+func (oe *OrchestratorEngine) GetTaskDelegator() *TaskDelegator {
+	oe.mu.RLock()
+	defer oe.mu.RUnlock()
+	return oe.taskDelegator
+}
+
+// SetSessionManager يضبط SessionManager في OrchestratorEngine
+func (oe *OrchestratorEngine) SetSessionManager(sm *SessionManager) {
+	oe.mu.Lock()
+	defer oe.mu.Unlock()
+	oe.sessionManager = sm
+	oe.logger.Info("تم ضبط SessionManager في OrchestratorEngine")
 }
 
 // SetPolicyMode يضبط وضع الـ Policy للـ Capability Manager
@@ -281,71 +316,218 @@ func (oe *OrchestratorEngine) IsRunning() bool {
 	return oe.running
 }
 
+// executeTaskViaThinkingEngine ينفذ مهمة عبر ThinkingEngine الخاص بالوكيل
+func (oe *OrchestratorEngine) executeTaskViaThinkingEngine(ctx context.Context, ap *unified.AgentPool, agentID string, task *agent.AgentTask) (*agent.TaskExecutionResult, error) {
+	// الحصول على أو إنشاء ThinkingEngine للوكيل
+	te, err := ap.GetOrCreateThinkingEngine(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get thinking engine for agent %s: %w", agentID, err)
+	}
+
+	oe.logger.Info("Executing task via agent ThinkingEngine",
+		zap.String("agent_id", agentID),
+		zap.String("task", task.Title),
+	)
+
+	// تحليل المهمة
+	analysis, err := te.AnalyzeTask(ctx, task.Title)
+	if err != nil {
+		return nil, fmt.Errorf("task analysis failed: %w", err)
+	}
+
+	// تخطيط المهمة
+	subtasks, err := te.PlanTask(ctx, analysis)
+	if err != nil {
+		return nil, fmt.Errorf("task planning failed: %w", err)
+	}
+
+	// تنفيذ الخطوات
+	results, err := te.ExecuteSteps(ctx, subtasks)
+	if err != nil {
+		return nil, fmt.Errorf("task execution failed: %w", err)
+	}
+
+	// التحقق من النتائج
+	verified, err := te.VerifyResults(ctx, results)
+	if err != nil {
+		oe.logger.Warn("Result verification failed", zap.Error(err))
+		verified = results
+	}
+
+	// تحويل النتيجة
+	output := ""
+	if len(verified) > 0 {
+		for _, v := range verified {
+			if str, ok := v.(string); ok {
+				output = str
+				break
+			}
+		}
+	}
+	if output == "" {
+		output = fmt.Sprintf("%v", verified)
+	}
+
+	return &agent.TaskExecutionResult{
+		Success:  true,
+		Output:   output,
+		Duration: 0,
+	}, nil
+}
+
 // ExecuteTask ينفذ مهمة باستخدام أفضل وكيل متاح
+// مسار التنفيذ: Session → TaskDelegator → CapabilityMatcher → UnifiedAgent
 func (oe *OrchestratorEngine) ExecuteTask(ctx context.Context, task *agent.AgentTask) (*agent.TaskExecutionResult, error) {
 	oe.mu.RLock()
 	if !oe.running {
 		oe.mu.RUnlock()
 		return nil, fmt.Errorf("orchestrator engine is not running")
 	}
-	ua := oe.unifiedAgent
 	sc := oe.sessionContainer
+	sm := oe.sessionManager
+	ap := oe.agentPool
+	ua := oe.unifiedAgent
+	td := oe.taskDelegator
 	oe.mu.RUnlock()
 
+	// 1. إذا كان task.Context يحتوي على session_id، حمّل الجلسة
+	var session *SessionInfo
+	sessionID := ""
+	if task.Inputs != nil {
+		if sid, ok := task.Inputs["session_id"].(string); ok {
+			sessionID = sid
+		}
+	}
+	if sessionID != "" && sm != nil {
+		sess, err := sm.GetSession(sessionID)
+		if err == nil {
+			session = sess
+			oe.logger.Info("Session loaded",
+				zap.String("session_id", sessionID),
+			)
+		}
+	}
+
+	// 2. إذا كانت الجلسة لها managerAgentID، فوّض المهمة لوكيل المدير
+	if session != nil && session.ManagerAgentID != "" {
+		if td != nil {
+			oe.logger.Info("Delegating task to manager agent via TaskDelegator",
+				zap.String("session_id", sessionID),
+				zap.String("agent_id", session.ManagerAgentID),
+			)
+			result, err := td.DelegateTask(ctx, task, session.ManagerAgentID, oe)
+			if err != nil {
+				return nil, fmt.Errorf("task delegation to manager agent failed: %w", err)
+			}
+			if sc != nil {
+				sc.UpdateAgentTaskResult(session.ManagerAgentID, result.Success)
+			}
+			return result, nil
+		}
+		// Fallback بدون TaskDelegator
+		if ap != nil {
+			managerAgent, err := ap.GetAgent(session.ManagerAgentID)
+			if err == nil && managerAgent != nil {
+				oe.logger.Info("Using manager agent ThinkingEngine from session (fallback)",
+					zap.String("session_id", sessionID),
+					zap.String("agent_id", session.ManagerAgentID),
+				)
+				result, err := oe.executeTaskViaThinkingEngine(ctx, ap, session.ManagerAgentID, task)
+				if err != nil {
+					return nil, fmt.Errorf("failed to execute task via manager agent ThinkingEngine: %w", err)
+				}
+				if sc != nil {
+					sc.UpdateAgentTaskResult(session.ManagerAgentID, result.Success)
+				}
+				return result, nil
+			}
+		}
+	}
+
+	// 3. استخدم TaskDelegator لاختيار أفضل وكيل وتفويض المهمة
+	if td != nil {
+		bestAgentID, selErr := td.SelectAgent(task)
+		if selErr == nil && bestAgentID != "" {
+			oe.logger.Info("TaskDelegator selected agent for task",
+				zap.String("agent_id", bestAgentID),
+				zap.String("task", task.Title),
+			)
+			result, err := td.DelegateTask(ctx, task, bestAgentID, oe)
+			if err != nil {
+				oe.logger.Warn("Task delegation failed, trying capability matcher",
+					zap.String("agent_id", bestAgentID),
+					zap.Error(err))
+			} else {
+				if sc != nil {
+					sc.UpdateAgentTaskResult(bestAgentID, result.Success)
+				}
+				return result, nil
+			}
+		}
+	}
+
+	// 4. إذا لا، استخدم CapabilityMatcher لإيجاد أفضل وكيل
+	requiredCapabilities := oe.getRequiredCapabilities(task)
+	bestAgentID, err := oe.capabilityMatcher.FindBestAgent(requiredCapabilities)
+	if err == nil && bestAgentID != "" {
+		if td != nil {
+			result, err := td.DelegateTask(ctx, task, bestAgentID, oe)
+			if err == nil {
+				if sc != nil {
+					sc.UpdateAgentTaskResult(bestAgentID, result.Success)
+				}
+				return result, nil
+			}
+		}
+		if ap != nil {
+			bestAgent, err := ap.GetAgent(bestAgentID)
+			if err == nil && bestAgent != nil {
+				oe.logger.Info("Using best agent ThinkingEngine from capability matcher (fallback)",
+					zap.String("agent_id", bestAgentID),
+				)
+				result, err := oe.executeTaskViaThinkingEngine(ctx, ap, bestAgentID, task)
+				if err != nil {
+					return nil, fmt.Errorf("failed to execute task via best agent ThinkingEngine: %w", err)
+				}
+				if sc != nil {
+					sc.UpdateAgentTaskResult(bestAgentID, result.Success)
+				}
+				return result, nil
+			}
+		}
+	}
+
+	// 5. Fallback أخير فقط: UnifiedAgent
 	if ua != nil {
+		oe.logger.Info("Falling back to UnifiedAgent")
 		thinkingResult, err := ua.ExecuteTaskWithThinking(ctx, task.Title)
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute task via UnifiedAgent: %w", err)
 		}
-		output, _ := thinkingResult.(string)
+		output := ""
+		if resultMap, ok := thinkingResult.(map[string]interface{}); ok {
+			if r, ok := resultMap["result"]; ok {
+				output = fmt.Sprintf("%v", r)
+			} else {
+				output = fmt.Sprintf("%v", resultMap)
+			}
+		} else if str, ok := thinkingResult.(string); ok {
+			output = str
+		} else {
+			output = fmt.Sprintf("%v", thinkingResult)
+		}
 		result := &agent.TaskExecutionResult{
 			Success:  true,
 			Output:   output,
 			Duration: 0,
 		}
-		// تسجيل النتيجة في الجلسة
 		if sc != nil {
 			sc.UpdateAgentTaskResult("unified", result.Success)
 		}
 		return result, nil
 	}
 
-	// Fallback: تحديد القدرات المطلوبة للمهمة والبحث عن أفضل وكيل
-	requiredCapabilities := oe.getRequiredCapabilities(task)
-
-	bestAgentObj, err := oe.registry.FindBestAgent(requiredCapabilities)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find suitable agent: %w", err)
-	}
-
-	bestAgentID := bestAgentObj.GetInfo().ID
-
-	result, err := bestAgentObj.ExecuteTask(ctx, task)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute task: %w", err)
-	}
-
-	tokensUsed := 0
-	if result.Metrics != nil {
-		if val, ok := result.Metrics["tokens"].(int); ok {
-			tokensUsed = val
-		}
-	}
-	oe.registry.UpdateStats(bestAgentID, result.Success, tokensUsed, result.Duration)
-
-	// تسجيل النتيجة في الجلسة
-	if sc != nil {
-		sc.UpdateAgentTaskResult(bestAgentID, result.Success)
-	}
-
-	oe.logger.Info("Task executed",
-		zap.String("task_id", task.ID),
-		zap.String("agent_id", bestAgentID),
-		zap.Bool("success", result.Success),
-		zap.Duration("duration", result.Duration),
-	)
-
-	return result, nil
+	return nil, fmt.Errorf("no agent available")
 }
 
 // ExecuteTaskWithRole ينفذ مهمة باستخدام وكيل بدور محدد
@@ -496,6 +678,26 @@ func (oe *OrchestratorEngine) RegisterAgent(agentObj agent.UnifiedAgent, metadat
 				zap.String("agent_id", agentID),
 				zap.String("role", string(role)),
 				zap.Error(err),
+			)
+		}
+	}
+
+	// [6] تسجيل في AgentPool - مصدر الحقيقة الوحيد للوكلاء الحقيقيين
+	if oe.agentPool != nil {
+		agentRole := tools.RoleRegular
+		if metadata != nil && metadata.AgentID == agentID {
+			// استخدام الدور من metadata إذا كان موجوداً
+			agentRole = tools.AgentRole(role)
+		}
+		if _, err := oe.agentPool.RegisterAgent(agentObj, agentRole); err != nil {
+			oe.logger.Warn("Failed to register agent in AgentPool",
+				zap.String("agent_id", agentID),
+				zap.Error(err),
+			)
+		} else {
+			oe.logger.Info("Agent registered in AgentPool",
+				zap.String("agent_id", agentID),
+				zap.String("role", string(agentRole)),
 			)
 		}
 	}

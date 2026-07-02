@@ -1,0 +1,45 @@
+# Musketeers Configuration Example
+# Copy this file to config.yaml and customize for your environment
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 60s
+  max_connections: 100
+
+database:
+  type: "badger"
+  host: "localhost"
+  port: 27017
+  database: "musketeers"
+  username: ""
+  password: ""
+
+email:
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  smtp_username: ""
+  smtp_password: ""
+  use_tls: true
+  from_address: "noreply@musketeers.com"
+  from_name: "Musketeers"
+
+storage:
+  type: "badger"
+  path: "./data/storage"
+  max_size: 10737418240  # 10GB
+  quota_limit: 1073741824  # 1GB
+
+network:
+  listen_addr: "/ip4/0.0.0.0/tcp/4001"
+  bootstrap_peers: []
+  dial_timeout: 10s
+  max_peers: 50
+
+security:
+  encryption_key: ""
+  enable_tls: false
+  tls_cert_file: ""
+  tls_key_file: ""

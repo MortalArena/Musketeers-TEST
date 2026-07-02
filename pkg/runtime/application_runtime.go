@@ -32,6 +32,7 @@ type ApplicationRuntime struct {
 }
 
 // NewApplicationRuntime ينشئ ApplicationRuntime جديد
+// ProviderRegistry مطلوب — إذا كان nil سيفشل Build()
 func NewApplicationRuntime(logger *zap.Logger) *ApplicationRuntime {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ApplicationRuntime{
@@ -43,6 +44,7 @@ func NewApplicationRuntime(logger *zap.Logger) *ApplicationRuntime {
 }
 
 // Build يبني كل المكونات
+// يجب أن يكون ProviderRegistry قد تم حقنه via SetProviderRegistry قبل استدعاء Build
 func (ar *ApplicationRuntime) Build() error {
 	ar.mu.Lock()
 	defer ar.mu.Unlock()
@@ -50,18 +52,69 @@ func (ar *ApplicationRuntime) Build() error {
 	ar.lifecycle.SetStatus(lifecycle.LifecycleStatusStarting)
 	ar.logger.Info("Building ApplicationRuntime")
 
-	// بناء المكونات التي تطبق Lifecycle
-	ar.providerRegistry = providers.NewProviderRegistry()
-	ar.agentRegistry = agent.NewAgentRegistry()
-	ar.agentRegistry.SetLogger(ar.logger)
-
-	// المكونات الأخرى - سيتم بناؤها لاحقاً
-	ar.agentPool = nil
-	ar.sessionContainer = nil
-	ar.orchestratorEngine = nil
+	if ar.providerRegistry == nil {
+		return fmt.Errorf("ProviderRegistry is nil — call SetProviderRegistry() before Build()")
+	}
+	if ar.agentRegistry == nil {
+		ar.agentRegistry = agent.NewAgentRegistry()
+		ar.agentRegistry.SetLogger(ar.logger)
+	}
 
 	ar.logger.Info("ApplicationRuntime built successfully")
 	return nil
+}
+
+// SetAgentPool يضبط AgentPool (يُستدعى من main.go بعد إنشاء AgentPool)
+func (ar *ApplicationRuntime) SetAgentPool(ap *unified.AgentPool) {
+	ar.mu.Lock()
+	defer ar.mu.Unlock()
+	ar.agentPool = ap
+	ar.logger.Info("AgentPool set on ApplicationRuntime")
+}
+
+// SetSessionContainer يضبط SessionContainer (يُستدعى من main.go بعد إنشاء SessionContainer)
+func (ar *ApplicationRuntime) SetSessionContainer(sc *session.SessionContainer) {
+	ar.mu.Lock()
+	defer ar.mu.Unlock()
+	ar.sessionContainer = sc
+	ar.logger.Info("SessionContainer set on ApplicationRuntime")
+}
+
+// SetOrchestratorEngine يضبط OrchestratorEngine (يُستدعى من main.go بعد إنشاء OrchestratorEngine)
+func (ar *ApplicationRuntime) SetOrchestratorEngine(oe *orchestrator.OrchestratorEngine) {
+	ar.mu.Lock()
+	defer ar.mu.Unlock()
+	ar.orchestratorEngine = oe
+	ar.logger.Info("OrchestratorEngine set on ApplicationRuntime")
+}
+
+// SetProviderRegistry يضبط ProviderRegistry (يُستدعى من main.go بعد إنشاء ProviderRegistry)
+func (ar *ApplicationRuntime) SetProviderRegistry(pr *providers.ProviderRegistry) {
+	ar.mu.Lock()
+	defer ar.mu.Unlock()
+	ar.providerRegistry = pr
+	ar.logger.Info("ProviderRegistry set on ApplicationRuntime")
+}
+
+// GetAgentPool يرجع AgentPool
+func (ar *ApplicationRuntime) GetAgentPool() *unified.AgentPool {
+	ar.mu.RLock()
+	defer ar.mu.RUnlock()
+	return ar.agentPool
+}
+
+// GetSessionContainer يرجع SessionContainer
+func (ar *ApplicationRuntime) GetSessionContainer() *session.SessionContainer {
+	ar.mu.RLock()
+	defer ar.mu.RUnlock()
+	return ar.sessionContainer
+}
+
+// GetOrchestratorEngine يرجع OrchestratorEngine
+func (ar *ApplicationRuntime) GetOrchestratorEngine() *orchestrator.OrchestratorEngine {
+	ar.mu.RLock()
+	defer ar.mu.RUnlock()
+	return ar.orchestratorEngine
 }
 
 // Inject يربط المكونات ببعضها

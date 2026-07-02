@@ -1474,11 +1474,52 @@ func (te *ThinkingEngine) GetSummary(ctx context.Context) (map[string]interface{
 }
 
 // SetSessionJournal يضبط سجل الجلسة
+func (te *ThinkingEngine) HasSessionJournal() bool {
+	te.mu.RLock()
+	defer te.mu.RUnlock()
+	return te.sessionJournal != nil
+}
+
+func (te *ThinkingEngine) HasCollectiveMemory() bool {
+	te.mu.RLock()
+	defer te.mu.RUnlock()
+	return te.collectiveMemory != nil
+}
+
+func (te *ThinkingEngine) HasSkillsManager() bool {
+	te.mu.RLock()
+	defer te.mu.RUnlock()
+	return te.skillsManager != nil
+}
+
+func (te *ThinkingEngine) HasTaskManager() bool {
+	te.mu.RLock()
+	defer te.mu.RUnlock()
+	return te.taskManager != nil
+}
+
+func (te *ThinkingEngine) HasWorkflowEngine() bool {
+	te.mu.RLock()
+	defer te.mu.RUnlock()
+	return te.workflowEngine != nil || te.workflowEngine16 != nil
+}
+
+func (te *ThinkingEngine) HasToolExecutor() bool {
+	te.mu.RLock()
+	defer te.mu.RUnlock()
+	return te.toolExecutor != nil
+}
+
+func (te *ThinkingEngine) HasProvider() bool {
+	te.mu.RLock()
+	defer te.mu.RUnlock()
+	return te.provider != nil
+}
+
 func (te *ThinkingEngine) SetSessionJournal(journal ISessionJournal) {
 	te.mu.Lock()
 	defer te.mu.Unlock()
 	te.sessionJournal = journal
-	te.logger.Info("تم تعيين سجل الجلسة")
 }
 
 // RegisterPeerAgent يسجل وكيل زميل

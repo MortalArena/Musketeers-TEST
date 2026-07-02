@@ -363,10 +363,8 @@ func (c *Connector) GetAdapter(name string) (Adapter, error) {
 
 // subscribeToEventBus يرتبط بأحداث Event Bus
 func (c *Connector) subscribeToEventBus() {
-	// الاستماع لكل الأحداث
-	c.eventBus.Subscribe("*", func(event eventbus.Event) {
-		c.eventBusToBridge <- event
-	})
+	// [FIX] NO wildcard subscribe — was creating infinite event loop:
+	// EventBus → bridge.Send → bridge.Receive → eventBus.Publish → EventBus (repeat)
 
 	// أحداث محددة مهمة
 	c.eventBus.Subscribe("agent.message", c.handleAgentMessage)

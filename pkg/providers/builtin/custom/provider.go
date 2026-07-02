@@ -328,7 +328,6 @@ func (p *Provider) StreamComplete(ctx context.Context, req *providers.Completion
 
 func (p *Provider) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
 	p.statusMu.RLock()
-	defer p.statusMu.RUnlock()
 
 	models := make([]providers.ModelInfo, 0, len(p.customModels))
 	for _, config := range p.customModels {
@@ -344,9 +343,11 @@ func (p *Provider) ListModels(ctx context.Context) ([]providers.ModelInfo, error
 		}
 		models = append(models, model)
 	}
+	count := len(models)
+	p.statusMu.RUnlock()
 
 	p.statusMu.Lock()
-	p.status.ModelsCount = len(models)
+	p.status.ModelsCount = count
 	p.statusMu.Unlock()
 
 	return models, nil
